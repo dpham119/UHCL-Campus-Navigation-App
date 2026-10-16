@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../map/campus_map_view.dart';
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -9,6 +11,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool accessibilityRouting = false;
+
+  // Lets the search bar below open the map's building/room search.
+  final GlobalKey<CampusMapViewState> _mapKey = GlobalKey<CampusMapViewState>();
 
   void _openBottomNavigationItem(BuildContext context, int index) {
     switch (index) {
@@ -77,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: TextField(
                 readOnly: true,
                 onTap: () {
-                  Navigator.pushNamed(context, '/search');
+                  _mapKey.currentState?.openSearch();
                 },
                 decoration: InputDecoration(
                   hintText: 'Search buildings, rooms, or locations',
@@ -90,36 +95,20 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // Map placeholder
+            // Campus map
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
                   width: double.infinity,
+                  clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: Theme.of(context).colorScheme.outlineVariant,
                     ),
                   ),
-                  child: const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.map_outlined, size: 72),
-                        SizedBox(height: 16),
-                        Text(
-                          'UHCL Campus Map',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text('ArcGIS map will be displayed here'),
-                      ],
-                    ),
-                  ),
+                  child: CampusMapView(key: _mapKey),
                 ),
               ),
             ),
@@ -187,7 +176,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
 
-      // Search removed from bottom navigation
       bottomNavigationBar: NavigationBar(
         selectedIndex: 0,
         onDestinationSelected: (index) {
