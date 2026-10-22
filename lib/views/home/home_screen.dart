@@ -12,191 +12,209 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool accessibilityRouting = false;
 
-  // Lets the search bar below open the map's building/room search.
   final GlobalKey<CampusMapViewState> _mapKey = GlobalKey<CampusMapViewState>();
 
-  void _openBottomNavigationItem(BuildContext context, int index) {
-    switch (index) {
-      case 0:
-        // Already on the map screen.
-        break;
+  void _openDirections() {
+    Navigator.pushNamed(context, '/directions');
+  }
 
-      case 1:
-        Navigator.pushNamed(context, '/directions');
-        break;
-
-      case 2:
-        Navigator.pushNamed(context, '/settings');
-        break;
-    }
+  void _openSettings() {
+    Navigator.pushNamed(context, '/settings');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('UHCL Campus Navigation'),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'route') {
-                Navigator.pushNamed(context, '/route');
-              }
-
-              if (value == 'report') {
-                Navigator.pushNamed(context, '/report');
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'route',
-                child: Row(
-                  children: [
-                    Icon(Icons.route),
-                    SizedBox(width: 12),
-                    Text('Route View'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'report',
-                child: Row(
-                  children: [
-                    Icon(Icons.report_outlined),
-                    SizedBox(width: 12),
-                    Text('Report an Issue'),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-
-      body: SafeArea(
-        child: Column(
+      body: SizedBox.expand(
+        child: Stack(
           children: [
-            // Search bar
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: TextField(
-                readOnly: true,
-                onTap: () {
-                  _mapKey.currentState?.openSearch();
-                },
-                decoration: InputDecoration(
-                  hintText: 'Search buildings, rooms, or locations',
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: const Icon(Icons.arrow_forward),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-              ),
-            ),
+            // FULL-SCREEN CAMPUS MAP
+            Positioned.fill(child: CampusMapView(key: _mapKey)),
 
-            // Campus map
-            Expanded(
+            // SEARCH BAR OVER THE MAP
+            SafeArea(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Container(
-                  width: double.infinity,
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outlineVariant,
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Material(
+                  elevation: 5,
+                  borderRadius: BorderRadius.circular(18),
+                  child: TextField(
+                    readOnly: true,
+                    onTap: () {
+                      _mapKey.currentState?.openSearch();
+                    },
+                    decoration: InputDecoration(
+                      hintText: 'Search buildings, rooms, or locations',
+                      prefixIcon: const Icon(Icons.search),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(18),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(18),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(18),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
-                  ),
-                  child: CampusMapView(key: _mapKey),
-                ),
-              ),
-            ),
-
-            // Accessibility toggle
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Card(
-                child: SwitchListTile(
-                  value: accessibilityRouting,
-                  onChanged: (value) {
-                    setState(() {
-                      accessibilityRouting = value;
-                    });
-                  },
-                  secondary: Icon(
-                    Icons.accessible,
-                    color: accessibilityRouting
-                        ? Theme.of(context).colorScheme.secondary
-                        : null,
-                  ),
-                  title: const Text(
-                    'Accessible Routing',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
-                    accessibilityRouting
-                        ? 'Prioritize ramps, elevators, and accessible paths'
-                        : 'Use standard campus routes',
                   ),
                 ),
-              ),
-            ),
-
-            // Main route controls
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        // GPS functionality will be implemented later.
-                      },
-                      icon: const Icon(Icons.my_location),
-                      label: const Text('My Location'),
-                    ),
-                  ),
-
-                  const SizedBox(width: 12),
-
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: () {
-                        Navigator.pushNamed(context, '/route');
-                      },
-                      icon: const Icon(Icons.directions_walk),
-                      label: const Text('Get Directions'),
-                    ),
-                  ),
-                ],
               ),
             ),
           ],
         ),
       ),
 
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: 0,
-        onDestinationSelected: (index) {
-          _openBottomNavigationItem(context, index);
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map),
-            label: 'Map',
+      // BOTTOM NAVIGATION BAR
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 10,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.directions_outlined),
-            label: 'Directions',
+          child: Row(
+            children: [
+              // MAP
+              Expanded(
+                child: _BottomNavigationItem(
+                  icon: Icons.map,
+                  label: 'Map',
+                  selected: true,
+                  onTap: () {
+                    // Already on the map screen.
+                  },
+                ),
+              ),
+
+              // DIRECTIONS
+              Expanded(
+                child: _BottomNavigationItem(
+                  icon: Icons.directions_outlined,
+                  label: 'Directions',
+                  onTap: _openDirections,
+                ),
+              ),
+
+              // ACCESSIBLE ROUTING
+              Expanded(
+                child: _AccessibilityNavigationItem(
+                  enabled: accessibilityRouting,
+                  onChanged: (value) {
+                    setState(() {
+                      accessibilityRouting = value;
+                    });
+
+                    // Later this value can be passed
+                    // to the routing engine.
+                  },
+                ),
+              ),
+
+              // SETTINGS
+              Expanded(
+                child: _BottomNavigationItem(
+                  icon: Icons.settings_outlined,
+                  label: 'Settings',
+                  onTap: _openSettings,
+                ),
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            label: 'Settings',
-          ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+class _BottomNavigationItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _BottomNavigationItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.selected = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected
+        ? Theme.of(context).colorScheme.primary
+        : Theme.of(context).colorScheme.onSurfaceVariant;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: color,
+                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AccessibilityNavigationItem extends StatelessWidget {
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  const _AccessibilityNavigationItem({
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: 32,
+          child: FittedBox(
+            fit: BoxFit.fill,
+            child: Switch(value: enabled, onChanged: onChanged),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Accessible',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: enabled ? FontWeight.bold : FontWeight.normal,
+            color: enabled
+                ? Theme.of(context).colorScheme.secondary
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
     );
   }
 }

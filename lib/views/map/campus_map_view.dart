@@ -150,8 +150,7 @@ class CampusMapViewState extends State<CampusMapView> {
 
       if (geometry == null) continue;
 
-      final properties =
-          (feature['properties'] as Map<String, dynamic>?) ?? {};
+      final properties = (feature['properties'] as Map<String, dynamic>?) ?? {};
 
       final geometryType = geometry['type'] as String? ?? '';
       final coordinates = geometry['coordinates'];
@@ -185,19 +184,11 @@ class CampusMapViewState extends State<CampusMapView> {
       String code = '';
 
       if (featureType == 'building') {
-        name = _readProperty(
-          properties,
-          ['BuildingName'],
-          'Unnamed Building',
-        );
+        name = _readProperty(properties, ['BuildingName'], 'Unnamed Building');
 
         code = _readProperty(properties, ['BuildingCode'], '');
       } else if (featureType == 'parking') {
-        name = _readProperty(
-          properties,
-          ['Parking_Lot_Name'],
-          'Parking Lot',
-        );
+        name = _readProperty(properties, ['Parking_Lot_Name'], 'Parking Lot');
       } else {
         // Actual room-number field from the floor files.
         code = _readProperty(properties, ['Room_Number'], '');
@@ -318,7 +309,8 @@ class CampusMapViewState extends State<CampusMapView> {
       final b = polygon[j];
 
       if ((a.latitude > point.latitude) != (b.latitude > point.latitude)) {
-        final intersectionLongitude = a.longitude +
+        final intersectionLongitude =
+            a.longitude +
             (point.latitude - a.latitude) *
                 (b.longitude - a.longitude) /
                 (b.latitude - a.latitude);
@@ -338,9 +330,7 @@ class CampusMapViewState extends State<CampusMapView> {
     CampusFeature? selected;
 
     for (final feature in _visibleFeatures.reversed) {
-      if (feature.polygons.any(
-        (polygon) => _pointInPolygon(point, polygon),
-      )) {
+      if (feature.polygons.any((polygon) => _pointInPolygon(point, polygon))) {
         selected = feature;
         break;
       }
@@ -420,11 +410,11 @@ class CampusMapViewState extends State<CampusMapView> {
     final List<CampusFeature> labelFeatures = outdoor
         ? _buildings
         : _visibleFeatures
-            .where(
-              (feature) =>
-                  feature.featureType == 'room' && feature.code.isNotEmpty,
-            )
-            .toList();
+              .where(
+                (feature) =>
+                    feature.featureType == 'room' && feature.code.isNotEmpty,
+              )
+              .toList();
 
     return labelFeatures.map((feature) {
       final String label = outdoor ? feature.name : feature.code;
@@ -443,8 +433,9 @@ class CampusMapViewState extends State<CampusMapView> {
                     ? Colors.orange.shade100
                     : Colors.white.withValues(alpha: 0.90),
                 border: Border.all(
-                  color:
-                      outdoor ? Colors.teal.shade700 : Colors.purple.shade700,
+                  color: outdoor
+                      ? Colors.teal.shade700
+                      : Colors.purple.shade700,
                   width: 0.8,
                 ),
                 borderRadius: BorderRadius.circular(4),
@@ -510,75 +501,153 @@ class CampusMapViewState extends State<CampusMapView> {
 
   @override
   Widget build(BuildContext context) {
+    final double safeTop = MediaQuery.paddingOf(context).top;
+
+    // Search bar begins 12px below the safe area and is roughly
+    // 56px tall. This positions the map controls underneath it.
+    final double controlsTop = safeTop + 78;
+
     return Stack(
+      fit: StackFit.expand,
       children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: _campusCenter,
-            initialZoom: 16,
-            minZoom: 13,
-            maxZoom: 20,
-            onPositionChanged: (camera, hasGesture) {
-              if ((_currentZoom >= _roomLabelZoom) !=
-                  (camera.zoom >= _roomLabelZoom)) {
-                setState(() {
+        // FULL MAP
+        Positioned.fill(
+          child: FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: _campusCenter,
+              initialZoom: 16,
+              minZoom: 13,
+              maxZoom: 20,
+              onPositionChanged: (camera, hasGesture) {
+                if ((_currentZoom >= _roomLabelZoom) !=
+                    (camera.zoom >= _roomLabelZoom)) {
+                  setState(() {
+                    _currentZoom = camera.zoom;
+                  });
+                } else {
                   _currentZoom = camera.zoom;
-                });
-              } else {
-                _currentZoom = camera.zoom;
-              }
-            },
-            onTap: (tapPosition, point) {
-              _selectFeatureAt(point);
-            },
+                }
+              },
+              onTap: (tapPosition, point) {
+                _selectFeatureAt(point);
+              },
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.uhcl_campus_navigation',
+                maxNativeZoom: 19,
+              ),
+
+              PolygonLayer(polygons: _buildVisiblePolygons()),
+
+              MarkerLayer(markers: _buildLabels()),
+
+              RichAttributionWidget(
+                attributions: [
+                  TextSourceAttribution(
+                    'OpenStreetMap contributors',
+                    onTap: () {},
+                  ),
+                ],
+              ),
+            ],
           ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.example.uhcl_campus_navigation',
-              maxNativeZoom: 19,
-            ),
-            PolygonLayer(polygons: _buildVisiblePolygons()),
-            MarkerLayer(markers: _buildLabels()),
-            RichAttributionWidget(
-              attributions: [
-                TextSourceAttribution(
-                  'OpenStreetMap contributors',
-                  onTap: () {},
-                ),
-              ],
-            ),
-          ],
         ),
 
-        // Current layer name (top left).
+        // CURRENT MAP LAYER - LEFT SIDE UNDER SEARCH
         Positioned(
-          top: 12,
-          left: 12,
+          top: controlsTop,
+          left: 16,
           child: Card(
+            elevation: 4,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.layers, size: 18),
                   const SizedBox(width: 8),
-                  Text(_selectedLayer),
+                  Text(
+                    _selectedLayer,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
                 ],
               ),
             ),
           ),
         ),
 
-        // Map controls (top right): layers, labels, center.
+        // RIGHT-SIDE MAP CONTROLS
         Positioned(
-          top: 12,
-          right: 12,
+          top: controlsTop,
+          right: 16,
           child: Card(
+            elevation: 5,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // THREE-DOT MENU
+                PopupMenuButton<String>(
+                  tooltip: 'More options',
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (value) {
+                    if (value == 'route') {
+                      Navigator.pushNamed(context, '/route');
+                    } else if (value == 'report') {
+                      Navigator.pushNamed(context, '/report');
+                    } else if (value == 'labels') {
+                      setState(() {
+                        _showLabels = !_showLabels;
+                      });
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'route',
+                      child: Row(
+                        children: [
+                          Icon(Icons.route),
+                          SizedBox(width: 12),
+                          Text('Route View'),
+                        ],
+                      ),
+                    ),
+
+                    const PopupMenuItem(
+                      value: 'report',
+                      child: Row(
+                        children: [
+                          Icon(Icons.report_outlined),
+                          SizedBox(width: 12),
+                          Text('Report an Issue'),
+                        ],
+                      ),
+                    ),
+
+                    PopupMenuItem(
+                      value: 'labels',
+                      child: Row(
+                        children: [
+                          Icon(_showLabels ? Icons.label_off : Icons.label),
+                          const SizedBox(width: 12),
+                          Text(_showLabels ? 'Hide Labels' : 'Show Labels'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                const Divider(height: 1),
+
+                // MAP LAYER SELECTOR
                 PopupMenuButton<String>(
                   tooltip: 'Select map layer',
                   icon: const Icon(Icons.layers),
@@ -592,15 +661,10 @@ class CampusMapViewState extends State<CampusMapView> {
                     }).toList();
                   },
                 ),
-                IconButton(
-                  tooltip: 'Toggle labels',
-                  icon: Icon(_showLabels ? Icons.label : Icons.label_off),
-                  onPressed: () {
-                    setState(() {
-                      _showLabels = !_showLabels;
-                    });
-                  },
-                ),
+
+                const Divider(height: 1),
+
+                // CENTER MAP
                 IconButton(
                   tooltip: 'Center map',
                   icon: const Icon(Icons.center_focus_strong),
@@ -613,6 +677,7 @@ class CampusMapViewState extends State<CampusMapView> {
           ),
         ),
 
+        // LOADING INDICATOR
         if (_isLoading)
           const Center(
             child: Card(
@@ -630,11 +695,12 @@ class CampusMapViewState extends State<CampusMapView> {
             ),
           ),
 
+        // ERROR MESSAGE
         if (_errorMessage != null)
           Positioned(
-            left: 12,
-            right: 12,
-            bottom: 12,
+            left: 16,
+            right: 16,
+            bottom: 16,
             child: Card(
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -643,22 +709,30 @@ class CampusMapViewState extends State<CampusMapView> {
             ),
           ),
 
+        // SELECTED BUILDING / ROOM DETAILS
         if (_selectedFeature != null)
           Positioned(
-            left: 12,
-            right: 12,
-            bottom: 12,
+            left: 16,
+            right: 16,
+            bottom: 16,
             child: _buildDetailsCard(),
           ),
 
+        // FEATURE COUNT
         if (!_isLoading && _errorMessage == null && _selectedFeature == null)
           Positioned(
-            left: 12,
-            bottom: 12,
+            left: 16,
+            bottom: 16,
             child: Card(
+              elevation: 3,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 child: Text(
                   'Features: ${_visibleFeatures.length}',
                   style: const TextStyle(fontWeight: FontWeight.w600),
@@ -695,9 +769,7 @@ class CampusMapViewState extends State<CampusMapView> {
                     isRoom
                         ? 'Room ${feature.code.isNotEmpty ? feature.code : "Unknown"}'
                         : feature.name,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
+                    style: Theme.of(context).textTheme.titleMedium
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -711,9 +783,12 @@ class CampusMapViewState extends State<CampusMapView> {
                 ),
               ],
             ),
-            if (isRoom && feature.name.isNotEmpty) Text('Name: ${feature.name}'),
-            if (!isRoom && feature.code.isNotEmpty) Text('Code: ${feature.code}'),
-            if (feature.building.isNotEmpty) Text('Building: ${feature.building}'),
+            if (isRoom && feature.name.isNotEmpty)
+              Text('Name: ${feature.name}'),
+            if (!isRoom && feature.code.isNotEmpty)
+              Text('Code: ${feature.code}'),
+            if (feature.building.isNotEmpty)
+              Text('Building: ${feature.building}'),
             if (feature.floor.isNotEmpty) Text('Floor: ${feature.floor}'),
             if (feature.department.isNotEmpty && feature.department != '-')
               Text('Department: ${feature.department}'),
@@ -771,9 +846,7 @@ class CampusSearchDelegate extends SearchDelegate<CampusFeature?> {
     final searchText = query.trim().toLowerCase();
 
     if (searchText.isEmpty) {
-      return const Center(
-        child: Text('Enter a building name or room number.'),
-      );
+      return const Center(child: Text('Enter a building name or room number.'));
     }
 
     final matches = features
@@ -786,9 +859,7 @@ class CampusSearchDelegate extends SearchDelegate<CampusFeature?> {
         .toList();
 
     if (matches.isEmpty) {
-      return const Center(
-        child: Text('No matching campus locations found.'),
-      );
+      return const Center(child: Text('No matching campus locations found.'));
     }
 
     return ListView.builder(
@@ -803,16 +874,16 @@ class CampusSearchDelegate extends SearchDelegate<CampusFeature?> {
         final String subtitle = feature.featureType == 'room'
             ? '${feature.building} • Floor ${feature.floor}'
             : feature.featureType == 'parking'
-                ? 'Parking Lot'
-                : 'Campus Building';
+            ? 'Parking Lot'
+            : 'Campus Building';
 
         return ListTile(
           leading: Icon(
             feature.featureType == 'room'
                 ? Icons.meeting_room
                 : feature.featureType == 'parking'
-                    ? Icons.local_parking
-                    : Icons.apartment,
+                ? Icons.local_parking
+                : Icons.apartment,
           ),
           title: Text(title),
           subtitle: Text(subtitle),

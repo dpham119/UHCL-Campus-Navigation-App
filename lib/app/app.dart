@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../views/home/home_screen.dart';
 import '../views/shared/placeholder_screen.dart';
 import '../theme/app_theme.dart';
+import '../views/directions/directions_screen.dart';
+import '../views/settings/settings_screen.dart';
 
 class CampusNavigationApp extends StatelessWidget {
   const CampusNavigationApp({super.key});
@@ -20,25 +22,18 @@ class CampusNavigationApp extends StatelessWidget {
       routes: {
         '/': (context) => const HomeScreen(),
 
-        '/search': (context) => const PlaceholderScreen(
-          title: 'Campus Search',
-          message: 'Campus location search will be implemented here.',
-        ),
-
+        // '/search': (context) => const PlaceholderScreen(
+        //   title: 'Campus Search',
+        //   message: 'Campus location search will be implemented here.',
+        // ),
         '/route': (context) => const PlaceholderScreen(
           title: 'Route',
           message: 'Generated route information will appear here.',
         ),
 
-        '/directions': (context) => const PlaceholderScreen(
-          title: 'Directions',
-          message: 'Step-by-step directions will appear here.',
-        ),
+        '/directions': (context) => const DirectionsScreen(),
 
-        '/settings': (context) => const PlaceholderScreen(
-          title: 'Settings',
-          message: 'Accessibility and application settings will appear here.',
-        ),
+        '/settings': (context) => const SettingsScreen(),
 
         '/report': (context) => const PlaceholderScreen(
           title: 'Report an Issue',

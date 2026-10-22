@@ -24,7 +24,7 @@ class AppTheme {
       scaffoldBackgroundColor: AppColors.background,
 
       appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.navy,
+        backgroundColor: AppColors.hawkBlue,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: false,
@@ -70,8 +70,8 @@ class AppTheme {
 
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.navy,
-          side: const BorderSide(color: AppColors.navy),
+          foregroundColor: AppColors.hawkBlue,
+          side: const BorderSide(color: AppColors.hawkBlue),
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
