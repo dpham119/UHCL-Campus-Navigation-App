@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 // A geographic feature loaded from one of the five GeoJSON files.
@@ -45,6 +46,13 @@ class CampusMapView extends StatefulWidget {
 
 class CampusMapViewState extends State<CampusMapView> {
   final MapController _mapController = MapController();
+
+  LatLng? _currentLocation;
+  bool _isLocating = false;
+
+  // User-selected starting point, independent of the GPS marker.
+  LatLng? _manualStartLocation;
+  bool _isSelectingManualLocation = false;
 
   List<CampusFeature> _buildings = [];
   List<CampusFeature> _parkingLots = [];
@@ -508,6 +516,79 @@ class CampusMapViewState extends State<CampusMapView> {
     });
   }
 
+  Future<void> _getCurrentLocation() async {
+    if (_isLocating) return;
+
+    setState(() {
+      _isLocating = true;
+    });
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Location services are disabled.');
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw Exception('Location permission denied.');
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+      if (!mounted) return;
+
+      final location = LatLng(position.latitude, position.longitude);
+      setState(() {
+        _currentLocation = location;
+      });
+      _mapController.move(location, 18);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Current location found!')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('GPS error: $error'),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLocating = false;
+        });
+      }
+    }
+  }
+
+  // This point can later be passed to the routing engine.
+  LatLng? get selectedStartingLocation =>
+      _manualStartLocation ?? _currentLocation;
+
+  void _setManualStartLocation(LatLng location) {
+    setState(() {
+      _manualStartLocation = location;
+      _isSelectingManualLocation = false;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Manual starting location selected!'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -530,7 +611,11 @@ class CampusMapViewState extends State<CampusMapView> {
               }
             },
             onTap: (tapPosition, point) {
-              _selectFeatureAt(point);
+              if (_isSelectingManualLocation) {
+                _setManualStartLocation(point);
+              } else {
+                _selectFeatureAt(point);
+              }
             },
           ),
           children: [
@@ -541,6 +626,36 @@ class CampusMapViewState extends State<CampusMapView> {
             ),
             PolygonLayer(polygons: _buildVisiblePolygons()),
             MarkerLayer(markers: _buildLabels()),
+            if (_currentLocation != null)
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: _currentLocation!,
+                    width: 40,
+                    height: 40,
+                    child: const Icon(
+                      Icons.my_location,
+                      color: Colors.blue,
+                      size: 32,
+                    ),
+                  ),
+                ],
+              ),
+            if (_manualStartLocation != null)
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: _manualStartLocation!,
+                    width: 45,
+                    height: 45,
+                    child: const Icon(
+                      Icons.location_on,
+                      color: Colors.green,
+                      size: 40,
+                    ),
+                  ),
+                ],
+              ),
             RichAttributionWidget(
               attributions: [
                 TextSourceAttribution(
@@ -606,6 +721,40 @@ class CampusMapViewState extends State<CampusMapView> {
                   icon: const Icon(Icons.center_focus_strong),
                   onPressed: () {
                     _mapController.move(_campusCenter, 16);
+                  },
+                ),
+                IconButton(
+                  tooltip: 'My current location',
+                  icon: _isLocating
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.my_location),
+                  onPressed: _isLocating ? null : _getCurrentLocation,
+                ),
+                IconButton(
+                  tooltip: 'Set manual starting location',
+                  icon: Icon(
+                    Icons.add_location_alt,
+                    color: _isSelectingManualLocation ? Colors.green : null,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isSelectingManualLocation =
+                          !_isSelectingManualLocation;
+                    });
+                    if (_isSelectingManualLocation) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Tap anywhere on the map to select your starting location.',
+                          ),
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    }
                   },
                 ),
               ],
