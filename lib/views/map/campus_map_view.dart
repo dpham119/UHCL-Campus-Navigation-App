@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 // A geographic feature loaded from one of the five GeoJSON files.
@@ -45,6 +46,13 @@ class CampusMapView extends StatefulWidget {
 
 class CampusMapViewState extends State<CampusMapView> {
   final MapController _mapController = MapController();
+
+  LatLng? _currentLocation;
+  bool _isLocating = false;
+
+  // User-selected starting point, independent of the GPS marker.
+  LatLng? _manualStartLocation;
+  bool _isSelectingManualLocation = false;
 
   List<CampusFeature> _buildings = [];
   List<CampusFeature> _parkingLots = [];
@@ -499,72 +507,165 @@ class CampusMapViewState extends State<CampusMapView> {
     });
   }
 
+  Future<void> _getCurrentLocation() async {
+    if (_isLocating) return;
+
+    setState(() {
+      _isLocating = true;
+    });
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Location services are disabled.');
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw Exception('Location permission denied.');
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+      if (!mounted) return;
+
+      final location = LatLng(position.latitude, position.longitude);
+      setState(() {
+        _currentLocation = location;
+      });
+      _mapController.move(location, 18);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Current location found!')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('GPS error: $error'),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLocating = false;
+        });
+      }
+    }
+  }
+
+  // This point can later be passed to the routing engine.
+  LatLng? get selectedStartingLocation =>
+      _manualStartLocation ?? _currentLocation;
+
+  void _setManualStartLocation(LatLng location) {
+    setState(() {
+      _manualStartLocation = location;
+      _isSelectingManualLocation = false;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Manual starting location selected!'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final double safeTop = MediaQuery.paddingOf(context).top;
-
-    // Search bar begins 12px below the safe area and is roughly
-    // 56px tall. This positions the map controls underneath it.
     final double controlsTop = safeTop + 78;
 
     return Stack(
-      fit: StackFit.expand,
       children: [
-        // FULL MAP
-        Positioned.fill(
-          child: FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _campusCenter,
-              initialZoom: 16,
-              minZoom: 13,
-              maxZoom: 20,
-              onPositionChanged: (camera, hasGesture) {
-                if ((_currentZoom >= _roomLabelZoom) !=
-                    (camera.zoom >= _roomLabelZoom)) {
-                  setState(() {
-                    _currentZoom = camera.zoom;
-                  });
-                } else {
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: _campusCenter,
+            initialZoom: 16,
+            minZoom: 13,
+            maxZoom: 20,
+            onPositionChanged: (camera, hasGesture) {
+              if ((_currentZoom >= _roomLabelZoom) !=
+                  (camera.zoom >= _roomLabelZoom)) {
+                setState(() {
                   _currentZoom = camera.zoom;
-                }
-              },
-              onTap: (tapPosition, point) {
+                });
+              } else {
+                _currentZoom = camera.zoom;
+              }
+            },
+            onTap: (tapPosition, point) {
+              if (_isSelectingManualLocation) {
+                _setManualStartLocation(point);
+              } else {
                 _selectFeatureAt(point);
-              },
+              }
+            },
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.example.uhcl_campus_navigation',
+              maxNativeZoom: 19,
             ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.uhcl_campus_navigation',
-                maxNativeZoom: 19,
-              ),
-
-              PolygonLayer(polygons: _buildVisiblePolygons()),
-
-              MarkerLayer(markers: _buildLabels()),
-
-              RichAttributionWidget(
-                attributions: [
-                  TextSourceAttribution(
-                    'OpenStreetMap contributors',
-                    onTap: () {},
+            PolygonLayer(polygons: _buildVisiblePolygons()),
+            MarkerLayer(markers: _buildLabels()),
+            if (_currentLocation != null)
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: _currentLocation!,
+                    width: 40,
+                    height: 40,
+                    child: const Icon(
+                      Icons.my_location,
+                      color: Colors.blue,
+                      size: 32,
+                    ),
                   ),
                 ],
               ),
-            ],
-          ),
+            if (_manualStartLocation != null)
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: _manualStartLocation!,
+                    width: 45,
+                    height: 45,
+                    child: const Icon(
+                      Icons.location_on,
+                      color: Colors.green,
+                      size: 40,
+                    ),
+                  ),
+                ],
+              ),
+            RichAttributionWidget(
+              attributions: [
+                TextSourceAttribution(
+                  'OpenStreetMap contributors',
+                  onTap: () {},
+                ),
+              ],
+            ),
+          ],
         ),
 
-        // CURRENT MAP LAYER - LEFT SIDE UNDER SEARCH
+        // Current layer name (top left).
         Positioned(
           top: controlsTop,
           left: 16,
           child: Card(
-            elevation: 4,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               child: Row(
@@ -572,82 +673,21 @@ class CampusMapViewState extends State<CampusMapView> {
                 children: [
                   const Icon(Icons.layers, size: 18),
                   const SizedBox(width: 8),
-                  Text(
-                    _selectedLayer,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
+                  Text(_selectedLayer),
                 ],
               ),
             ),
           ),
         ),
 
-        // RIGHT-SIDE MAP CONTROLS
+        // Map controls (top right): layers, labels, center.
         Positioned(
           top: controlsTop,
           right: 16,
           child: Card(
-            elevation: 5,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // THREE-DOT MENU
-                PopupMenuButton<String>(
-                  tooltip: 'More options',
-                  icon: const Icon(Icons.more_vert),
-                  onSelected: (value) {
-                    if (value == 'route') {
-                      Navigator.pushNamed(context, '/route');
-                    } else if (value == 'report') {
-                      Navigator.pushNamed(context, '/report');
-                    } else if (value == 'labels') {
-                      setState(() {
-                        _showLabels = !_showLabels;
-                      });
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'route',
-                      child: Row(
-                        children: [
-                          Icon(Icons.route),
-                          SizedBox(width: 12),
-                          Text('Route View'),
-                        ],
-                      ),
-                    ),
-
-                    const PopupMenuItem(
-                      value: 'report',
-                      child: Row(
-                        children: [
-                          Icon(Icons.report_outlined),
-                          SizedBox(width: 12),
-                          Text('Report an Issue'),
-                        ],
-                      ),
-                    ),
-
-                    PopupMenuItem(
-                      value: 'labels',
-                      child: Row(
-                        children: [
-                          Icon(_showLabels ? Icons.label_off : Icons.label),
-                          const SizedBox(width: 12),
-                          Text(_showLabels ? 'Hide Labels' : 'Show Labels'),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-
-                const Divider(height: 1),
-
-                // MAP LAYER SELECTOR
                 PopupMenuButton<String>(
                   tooltip: 'Select map layer',
                   icon: const Icon(Icons.layers),
@@ -661,10 +701,15 @@ class CampusMapViewState extends State<CampusMapView> {
                     }).toList();
                   },
                 ),
-
-                const Divider(height: 1),
-
-                // CENTER MAP
+                IconButton(
+                  tooltip: 'Toggle labels',
+                  icon: Icon(_showLabels ? Icons.label : Icons.label_off),
+                  onPressed: () {
+                    setState(() {
+                      _showLabels = !_showLabels;
+                    });
+                  },
+                ),
                 IconButton(
                   tooltip: 'Center map',
                   icon: const Icon(Icons.center_focus_strong),
@@ -672,12 +717,44 @@ class CampusMapViewState extends State<CampusMapView> {
                     _mapController.move(_campusCenter, 16);
                   },
                 ),
+                IconButton(
+                  tooltip: 'My current location',
+                  icon: _isLocating
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.my_location),
+                  onPressed: _isLocating ? null : _getCurrentLocation,
+                ),
+                IconButton(
+                  tooltip: 'Set manual starting location',
+                  icon: Icon(
+                    Icons.add_location_alt,
+                    color: _isSelectingManualLocation ? Colors.green : null,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isSelectingManualLocation = !_isSelectingManualLocation;
+                    });
+                    if (_isSelectingManualLocation) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Tap anywhere on the map to select your starting location.',
+                          ),
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    }
+                  },
+                ),
               ],
             ),
           ),
         ),
 
-        // LOADING INDICATOR
         if (_isLoading)
           const Center(
             child: Card(
@@ -695,12 +772,11 @@ class CampusMapViewState extends State<CampusMapView> {
             ),
           ),
 
-        // ERROR MESSAGE
         if (_errorMessage != null)
           Positioned(
-            left: 16,
-            right: 16,
-            bottom: 16,
+            left: 12,
+            right: 12,
+            bottom: 12,
             child: Card(
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -709,25 +785,19 @@ class CampusMapViewState extends State<CampusMapView> {
             ),
           ),
 
-        // SELECTED BUILDING / ROOM DETAILS
         if (_selectedFeature != null)
           Positioned(
-            left: 16,
-            right: 16,
-            bottom: 16,
+            left: 12,
+            right: 12,
+            bottom: 12,
             child: _buildDetailsCard(),
           ),
 
-        // FEATURE COUNT
         if (!_isLoading && _errorMessage == null && _selectedFeature == null)
           Positioned(
-            left: 16,
-            bottom: 16,
+            left: 12,
+            bottom: 12,
             child: Card(
-              elevation: 3,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
