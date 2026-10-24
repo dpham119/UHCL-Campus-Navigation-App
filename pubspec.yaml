@@ -65,6 +65,8 @@ flutter:
     - assets/maps/campus_first_floor.geojson
     - assets/maps/campus_second_floor.geojson
     - assets/maps/campus_third_floor.geojson
+    - assets/maps/campus_graph.json
+    - assets/maps/campus_indoor_graph.json
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

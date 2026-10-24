@@ -123,6 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     setState(() {
                       accessibilityRouting = value;
                     });
+                    _mapKey.currentState?.setAccessibleOnly(value);
                   },
                   secondary: Icon(
                     Icons.accessible,
