@@ -6,6 +6,6 @@ void main() {
   testWidgets('Campus Navigation App loads', (WidgetTester tester) async {
     await tester.pumpWidget(const CampusNavigationApp());
 
-    expect(find.text('UHCL Campus Navigation'), findsOneWidget);
+    expect(find.text('Accessible'), findsOneWidget);
   });
 }
