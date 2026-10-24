@@ -115,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     setState(() {
                       accessibilityRouting = value;
                     });
-
+                     _mapKey.currentState?.setAccessibleOnly(value);
                     // Later this value can be passed
                     // to the routing engine.
                   },

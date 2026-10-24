@@ -6,6 +6,9 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../routing/campus_graph_loader.dart';
+import '../../routing/routing.dart';
+
 // A geographic feature loaded from one of the five GeoJSON files.
 class CampusFeature {
   final String name;
@@ -62,6 +65,22 @@ class CampusMapViewState extends State<CampusMapView> {
 
   CampusFeature? _selectedFeature;
 
+  // Route generator state.
+  CampusGraph? _graph;
+  IndoorRegions? _regions;
+  CampusFeature? _routeStart;
+  CampusFeature? _routeDestination;
+  RouteResult? _route;
+  List<_RouteRun> _routeRuns = [];
+  bool _accessibleOnly = false;
+
+  // If a place is farther than this from the nearest walkway, there is
+  // no usable walkway data for it yet.
+  static const double _maxSnapMeters = 250;
+
+  // Room nodes sit exactly at the room's center, so they should match.
+  static const double _maxRoomSnapMeters = 10;
+
   LatLng _campusCenter = const LatLng(29.5776, -95.1000);
 
   String _selectedLayer = 'Outdoor Campus';
@@ -84,6 +103,274 @@ class CampusMapViewState extends State<CampusMapView> {
   void initState() {
     super.initState();
     _loadAllLayers();
+    _loadGraph();
+  }
+
+  Future<void> _loadGraph() async {
+    try {
+      final graph = await loadCampusGraph();
+      IndoorRegions? regions;
+      try {
+        regions = IndoorRegions.parse(
+          await rootBundle.loadString('assets/maps/campus_indoor_graph.json'),
+        );
+      } catch (_) {
+        // Without these, indoor routes just stay a little zig-zagged.
+      }
+      if (!mounted) return;
+      setState(() {
+        _graph = graph;
+        _regions = regions;
+      });
+    } catch (_) {
+      // Routing stays unavailable, but the map itself still works.
+    }
+  }
+
+  /// Called by the home screen's Accessible Routing switch.
+  void setAccessibleOnly(bool value) {
+    setState(() {
+      _accessibleOnly = value;
+    });
+
+    final start = _routeStart;
+    final destination = _routeDestination;
+    if (_route != null && start != null && destination != null) {
+      _generateRoute(start, destination);
+    }
+  }
+
+  void _setStart(CampusFeature feature) {
+    setState(() {
+      _routeStart = feature;
+    });
+    _showMessage('Start set. Now pick a destination and tap Directions here.');
+  }
+
+  void _clearRoute() {
+    setState(() {
+      _route = null;
+      _routeDestination = null;
+      _routeRuns = [];
+    });
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _featureLabel(CampusFeature feature) {
+    if (feature.featureType == 'room') {
+      return 'Room ${feature.code.isNotEmpty ? feature.code : feature.name}';
+    }
+    return feature.name;
+  }
+
+  // 0 = outdoors, 1-3 = building floors. Matches the map layer names.
+  int _floorForLayer(String layer) {
+    switch (layer) {
+      case 'First Floor':
+        return 1;
+      case 'Second Floor':
+        return 2;
+      case 'Third Floor':
+        return 3;
+      default:
+        return 0;
+    }
+  }
+
+  String _layerForFloor(int floor) {
+    switch (floor) {
+      case 1:
+        return 'First Floor';
+      case 2:
+        return 'Second Floor';
+      case 3:
+        return 'Third Floor';
+      default:
+        return 'Outdoor Campus';
+    }
+  }
+
+  String _floorLabel(int floor) => floor == 0 ? 'Outdoors' : 'Floor $floor';
+
+  /// Floors the route passes through, in the order it first reaches them.
+  /// Parts of the route on the same floor (even in different buildings)
+  /// share one chip, because the map layer shows them together.
+  List<int> _routeFloors() {
+    final floors = <int>[];
+    for (final run in _routeRuns) {
+      if (!floors.contains(run.floor)) floors.add(run.floor);
+    }
+    return floors;
+  }
+
+  void _showFloor(int floor) {
+    _changeLayer(_layerForFloor(floor));
+    final points = [
+      for (final run in _routeRuns)
+        if (run.floor == floor) ...run.points,
+    ];
+    if (points.length >= 2) {
+      _mapController.fitCamera(
+        CameraFit.coordinates(
+          coordinates: points,
+          padding: const EdgeInsets.all(56),
+          maxZoom: 19,
+        ),
+      );
+    }
+  }
+
+  int _featureFloor(CampusFeature feature) {
+    if (feature.featureType != 'room') return 0;
+    return int.tryParse(feature.floor) ?? 1;
+  }
+
+  /// The graph node a feature starts or ends at: the room's own node for
+  /// rooms, otherwise the nearest outdoor path point or building entrance.
+  NearestNode? _nodeFor(CampusGraph graph, CampusFeature feature) {
+    if (feature.featureType == 'room') {
+      final floor = _featureFloor(feature);
+      final found = graph.nearestNode(
+        feature.center.latitude,
+        feature.center.longitude,
+        where: (node) =>
+            node.kind == NodeKind.room &&
+            node.floor == floor &&
+            node.building == feature.building,
+      );
+      if (found != null && found.distanceMeters <= _maxRoomSnapMeters) {
+        return found;
+      }
+      return null;
+    }
+
+    final found = graph.nearestNode(
+      feature.center.latitude,
+      feature.center.longitude,
+      where: (node) =>
+          node.kind == NodeKind.outdoor || node.kind == NodeKind.entrance,
+    );
+    if (found != null && found.distanceMeters <= _maxSnapMeters) {
+      return found;
+    }
+    return null;
+  }
+
+  /// Splits a route into runs that stay on one floor, so each map layer
+  /// can draw its own part. A run starts where the previous one ended so
+  /// the lines meet.
+  List<_RouteRun> _splitIntoRuns(
+    List<GraphNode> path, {
+    required bool startIsRoom,
+    required bool endIsRoom,
+  }) {
+    // A building (not a room) as start or end is only a door on the outside,
+    // so that end counts as outdoors and gets no floor button of its own.
+    int floorAt(int index) {
+      final node = path[index];
+      if (node.kind == NodeKind.entrance &&
+          ((index == 0 && !startIsRoom) ||
+              (index == path.length - 1 && !endIsRoom))) {
+        return 0;
+      }
+      return node.floor;
+    }
+
+    // Group the nodes by floor first, then straighten each group.
+    final groups = <List<GraphNode>>[];
+    final groupFloors = <int>[];
+    for (var i = 0; i < path.length; i++) {
+      final floor = floorAt(i);
+      if (groups.isEmpty || groupFloors.last != floor) {
+        groups.add(<GraphNode>[]);
+        groupFloors.add(floor);
+      }
+      groups.last.add(path[i]);
+    }
+    final runs = <_RouteRun>[];
+    for (var g = 0; g < groups.length; g++) {
+      final nodes = groups[g];
+      final points = _regions != null
+          ? _regions!.smoothPath(nodes)
+          : [for (final n in nodes) LatLng(n.latitude, n.longitude)];
+      final run = _RouteRun(groupFloors[g], nodes.first.building, points);
+      if (runs.isNotEmpty) {
+        // Start where the previous part ended so the lines meet.
+        run.points.insert(0, runs.last.points.last);
+        runs.last.points.add(run.points[1]);
+      }
+      runs.add(run);
+    }
+    return runs;
+  }
+
+  void _generateRoute(CampusFeature start, CampusFeature destination) {
+    final graph = _graph;
+    if (graph == null) {
+      _showMessage('Route data is still loading. Try again in a moment.');
+      return;
+    }
+
+    final from = _nodeFor(graph, start);
+    final to = _nodeFor(graph, destination);
+
+    if (from == null || to == null) {
+      _clearRoute();
+      _showMessage('No walkway data near that location yet.');
+      return;
+    }
+
+    if (from.node.id == to.node.id) {
+      _clearRoute();
+      _showMessage('These two places share the same walkway point, so there '
+          'is nothing to route. Pick more specific places.');
+      return;
+    }
+
+    try {
+      final result = RouteGenerator(graph).generate(
+        from.node.id,
+        to.node.id,
+        edgeFilter: _accessibleOnly ? (edge) => edge.isAccessible : null,
+      );
+
+      final runs = _splitIntoRuns(
+        result.path,
+        startIsRoom: start.featureType == 'room',
+        endIsRoom: destination.featureType == 'room',
+      );
+
+      final allPoints = runs.expand((run) => run.points).toList();
+
+      setState(() {
+        _routeStart = start;
+        _routeDestination = destination;
+        _route = result;
+        _routeRuns = runs;
+        _selectedLayer = _layerForFloor(runs.first.floor);
+        _selectedFeature = null;
+      });
+
+      _mapController.fitCamera(
+        CameraFit.coordinates(
+          coordinates: allPoints,
+          padding: const EdgeInsets.all(56),
+        ),
+      );
+    } on RouteException catch (error) {
+      _clearRoute();
+      if (error.error == RouteError.noPathFound && _accessibleOnly) {
+        _showMessage('No accessible route found. Turn off Accessible '
+            'Routing to see the regular route.');
+      } else {
+        _showMessage(error.message);
+      }
+    }
   }
 
   Future<void> _loadAllLayers() async {
@@ -619,6 +906,21 @@ class CampusMapViewState extends State<CampusMapView> {
               maxNativeZoom: 19,
             ),
             PolygonLayer(polygons: _buildVisiblePolygons()),
+            if (_routeRuns.isNotEmpty)
+              PolylineLayer(
+                polylines: [
+                  for (final run in _routeRuns)
+                    if (run.floor == _floorForLayer(_selectedLayer))
+                      Polyline(
+                        points: run.points,
+                        strokeWidth: 5,
+                        color: Colors.blue,
+                        borderStrokeWidth: 2,
+                        borderColor: Colors.white,
+                      ),
+                ],
+              ),
+            MarkerLayer(markers: _buildRouteMarkers()),
             MarkerLayer(markers: _buildLabels()),
             if (_currentLocation != null)
               MarkerLayer(
@@ -785,6 +1087,17 @@ class CampusMapViewState extends State<CampusMapView> {
             ),
           ),
 
+        if (_route != null)
+          Positioned(
+            top: 64,
+            left: 12,
+            right: 60,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: _buildRouteCard(),
+            ),
+          ),
+
         if (_selectedFeature != null)
           Positioned(
             left: 12,
@@ -811,6 +1124,95 @@ class CampusMapViewState extends State<CampusMapView> {
             ),
           ),
       ],
+    );
+  }
+
+  Marker _routeMarker(LatLng point, IconData icon, Color color, double size) {
+    return Marker(
+      point: point,
+      width: size + 4,
+      height: size + 4,
+      child: Icon(icon, color: color, size: size),
+    );
+  }
+
+  /// Start and end markers sit where the route really starts and ends (the
+  /// room, or the nearest path point / entrance for a building).
+  List<Marker> _buildRouteMarkers() {
+    final markers = <Marker>[];
+    final layerFloor = _floorForLayer(_selectedLayer);
+
+    if (_routeRuns.isNotEmpty) {
+      final first = _routeRuns.first;
+      final last = _routeRuns.last;
+      if (first.floor == layerFloor) {
+        markers.add(_routeMarker(
+            first.points.first, Icons.trip_origin, Colors.green, 32));
+      }
+      if (last.floor == layerFloor) {
+        markers.add(
+            _routeMarker(last.points.last, Icons.place, Colors.red, 36));
+      }
+    } else if (_routeStart != null &&
+        _featureFloor(_routeStart!) == layerFloor) {
+      markers.add(_routeMarker(
+          _routeStart!.center, Icons.trip_origin, Colors.green, 32));
+    }
+    return markers;
+  }
+
+  Widget _buildRouteCard() {
+    final route = _route!;
+    final meters = route.distanceMeters.round();
+    final rawMinutes = (route.walkingTime.inSeconds / 60).ceil();
+    final minutes = rawMinutes < 1 ? 1 : rawMinutes;
+
+    return Card(
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 4, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.directions_walk, color: Colors.blue),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '$meters m \u2022 $minutes min'
+                    '${_accessibleOnly ? ' \u2022 Accessible' : ''}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: 'Clear route',
+                  onPressed: _clearRoute,
+                ),
+              ],
+            ),
+            if (_routeFloors().length > 1)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    for (final floor in _routeFloors())
+                      ActionChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text(_floorLabel(floor)),
+                        onPressed: () => _showFloor(floor),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -864,6 +1266,27 @@ class CampusMapViewState extends State<CampusMapView> {
               Text('Department: ${feature.department}'),
             if (feature.roomUse.isNotEmpty) Text('Use: ${feature.roomUse}'),
             if (feature.address.isNotEmpty) Text('Address: ${feature.address}'),
+            const SizedBox(height: 8),
+            if (_routeStart != null)
+              Text('Start: ${_featureLabel(_routeStart!)}'),
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => _setStart(feature),
+                  icon: const Icon(Icons.trip_origin),
+                  label: const Text('Set as start'),
+                ),
+                FilledButton.icon(
+                  onPressed: _routeStart == null ||
+                          identical(_routeStart, feature)
+                      ? null
+                      : () => _generateRoute(_routeStart!, feature),
+                  icon: const Icon(Icons.directions_walk),
+                  label: const Text('Directions here'),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -964,4 +1387,13 @@ class CampusSearchDelegate extends SearchDelegate<CampusFeature?> {
       },
     );
   }
+}
+
+// One stretch of a route that stays on a single floor (0 = outdoors).
+class _RouteRun {
+  final int floor;
+  final String building; // empty outdoors
+  final List<LatLng> points;
+
+  _RouteRun(this.floor, this.building, this.points);
 }
