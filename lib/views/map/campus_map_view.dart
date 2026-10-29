@@ -62,6 +62,7 @@ class CampusMapViewState extends State<CampusMapView> {
   List<CampusFeature> _firstFloor = [];
   List<CampusFeature> _secondFloor = [];
   List<CampusFeature> _thirdFloor = [];
+  List<CampusFeature> _walkways = [];
 
   CampusFeature? _selectedFeature;
 
@@ -327,8 +328,10 @@ class CampusMapViewState extends State<CampusMapView> {
 
     if (from.node.id == to.node.id) {
       _clearRoute();
-      _showMessage('These two places share the same walkway point, so there '
-          'is nothing to route. Pick more specific places.');
+      _showMessage(
+        'These two places share the same walkway point, so there '
+        'is nothing to route. Pick more specific places.',
+      );
       return;
     }
 
@@ -365,8 +368,10 @@ class CampusMapViewState extends State<CampusMapView> {
     } on RouteException catch (error) {
       _clearRoute();
       if (error.error == RouteError.noPathFound && _accessibleOnly) {
-        _showMessage('No accessible route found. Turn off Accessible '
-            'Routing to see the regular route.');
+        _showMessage(
+          'No accessible route found. Turn off Accessible '
+          'Routing to see the regular route.',
+        );
       } else {
         _showMessage(error.message);
       }
@@ -383,6 +388,11 @@ class CampusMapViewState extends State<CampusMapView> {
       final parking = await _loadGeoJson(
         'assets/maps/campus_parking.geojson',
         'parking',
+      );
+
+      final walkways = await _loadGeoJson(
+        'assets/maps/campus_walkways.geojson',
+        'walkway',
       );
 
       final floor1 = await _loadGeoJson(
@@ -408,6 +418,7 @@ class CampusMapViewState extends State<CampusMapView> {
         _firstFloor = floor1;
         _secondFloor = floor2;
         _thirdFloor = floor3;
+        _walkways = walkways;
 
         if (_buildings.isNotEmpty) {
           _campusCenter = _averageCenter(_buildings);
@@ -484,8 +495,9 @@ class CampusMapViewState extends State<CampusMapView> {
         code = _readProperty(properties, ['BuildingCode'], '');
       } else if (featureType == 'parking') {
         name = _readProperty(properties, ['Parking_Lot_Name'], 'Parking Lot');
+      } else if (featureType == 'walkway') {
+        name = 'Campus Walkway';
       } else {
-        // Actual room-number field from the floor files.
         code = _readProperty(properties, ['Room_Number'], '');
 
         name = _readProperty(properties, ['Room_Name'], '');
@@ -656,6 +668,32 @@ class CampusMapViewState extends State<CampusMapView> {
 
   List<Polygon> _buildVisiblePolygons() {
     final List<Polygon> polygons = [];
+    // Draw the real UHCL ArcGIS sidewalk polygons
+    // on the Outdoor Campus layer.
+    if (_selectedLayer == 'Outdoor Campus') {
+      for (final walkway in _walkways) {
+        for (final points in walkway.polygons) {
+          polygons.add(
+            Polygon(
+              points: points,
+
+              // Almost transparent interior.
+              color: const Color.fromARGB(
+                255,
+                90,
+                90,
+                90,
+              ).withValues(alpha: 0.03),
+
+              // Cyan outline similar to ArcGIS.
+              borderColor: const Color.fromARGB(255, 124, 124, 124),
+
+              borderStrokeWidth: 2.5,
+            ),
+          );
+        }
+      }
+    }
 
     for (final feature in _visibleFeatures) {
       final bool selected = identical(feature, _selectedFeature);
@@ -1146,17 +1184,20 @@ class CampusMapViewState extends State<CampusMapView> {
       final first = _routeRuns.first;
       final last = _routeRuns.last;
       if (first.floor == layerFloor) {
-        markers.add(_routeMarker(
-            first.points.first, Icons.trip_origin, Colors.green, 32));
+        markers.add(
+          _routeMarker(first.points.first, Icons.trip_origin, Colors.green, 32),
+        );
       }
       if (last.floor == layerFloor) {
         markers.add(
-            _routeMarker(last.points.last, Icons.place, Colors.red, 36));
+          _routeMarker(last.points.last, Icons.place, Colors.red, 36),
+        );
       }
     } else if (_routeStart != null &&
         _featureFloor(_routeStart!) == layerFloor) {
-      markers.add(_routeMarker(
-          _routeStart!.center, Icons.trip_origin, Colors.green, 32));
+      markers.add(
+        _routeMarker(_routeStart!.center, Icons.trip_origin, Colors.green, 32),
+      );
     }
     return markers;
   }
@@ -1278,8 +1319,8 @@ class CampusMapViewState extends State<CampusMapView> {
                   label: const Text('Set as start'),
                 ),
                 FilledButton.icon(
-                  onPressed: _routeStart == null ||
-                          identical(_routeStart, feature)
+                  onPressed:
+                      _routeStart == null || identical(_routeStart, feature)
                       ? null
                       : () => _generateRoute(_routeStart!, feature),
                   icon: const Icon(Icons.directions_walk),

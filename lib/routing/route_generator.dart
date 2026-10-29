@@ -2,6 +2,7 @@ import 'campus_graph.dart';
 import 'graph_edge.dart';
 import 'min_priority_queue.dart';
 import 'route_result.dart';
+import 'route_preferences.dart';
 
 /// Calculates shortest walking routes over a [CampusGraph] using
 /// Dijkstra's algorithm.
@@ -22,6 +23,7 @@ class RouteGenerator {
   RouteResult generate(
     String startId,
     String destinationId, {
+    RoutePreferences preferences = const RoutePreferences(),
     bool Function(GraphEdge edge)? edgeFilter,
   }) {
     if (graph.isEmpty) {
@@ -55,7 +57,17 @@ class RouteGenerator {
 
       for (final edge in graph.edgesFrom(current.nodeId)) {
         if (edge.isClosed) continue;
-        if (edgeFilter != null && !edgeFilter(edge)) continue;
+
+        // Accessible routing ignores any edge that has been
+        // marked inaccessible.
+        if (preferences.accessibleRouting && !edge.isAccessible) {
+          continue;
+        }
+
+        if (edgeFilter != null && !edgeFilter(edge)) {
+          continue;
+        }
+
         if (finished.contains(edge.to)) continue;
 
         final candidate = current.priority + edge.distanceMeters;

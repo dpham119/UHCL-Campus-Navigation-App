@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:latlong2/latlong.dart';
 
@@ -21,11 +23,13 @@ CampusGraph parseCampusGraph(String jsonText) {
 
   for (final item in data['nodes'] as List<dynamic>) {
     final node = item as List<dynamic>;
-    graph.addNode(GraphNode(
-      id: node[0] as String,
-      latitude: (node[1] as num).toDouble(),
-      longitude: (node[2] as num).toDouble(),
-    ));
+    graph.addNode(
+      GraphNode(
+        id: node[0] as String,
+        latitude: (node[1] as num).toDouble(),
+        longitude: (node[2] as num).toDouble(),
+      ),
+    );
   }
 
   for (final item in data['edges'] as List<dynamic>) {
@@ -68,7 +72,7 @@ NodeKind _kindFromCode(int code) {
 void addIndoorGraph(
   CampusGraph graph,
   String indoorJson, {
-  double entranceLinkMeters = 80,
+  double entranceLinkMeters = 50,
 }) {
   final data = jsonDecode(indoorJson) as Map<String, dynamic>;
   final buildings = (data['buildings'] as List<dynamic>).cast<String>();
@@ -91,11 +95,25 @@ void addIndoorGraph(
 
   for (final item in data['edges'] as List<dynamic>) {
     final e = item as List<dynamic>;
+
+    final fromId = 'i${e[0]}';
+    final toId = 'i${e[1]}';
+
+    final fromNode = graph.nodeById(fromId);
+    final toNode = graph.nodeById(toId);
+
+    var isAccessible = (e[3] as num) != 0;
+
+    // Never allow stairs in accessibility mode.
+    if (fromNode?.kind == NodeKind.stairs || toNode?.kind == NodeKind.stairs) {
+      isAccessible = false;
+    }
+
     graph.addEdge(
-      'i${e[0]}',
-      'i${e[1]}',
+      fromId,
+      toId,
       distanceMeters: (e[2] as num).toDouble() / 10.0,
-      isAccessible: (e[3] as num) != 0,
+      isAccessible: isAccessible,
     );
   }
 
@@ -103,6 +121,7 @@ void addIndoorGraph(
   final outdoor = graph.nodes.where((n) => n.kind == NodeKind.outdoor).toList();
   for (final entrance in entrances) {
     final candidates = <NearestNode>[];
+
     for (final node in outdoor) {
       final d = haversineMeters(
         entrance.latitude,
@@ -110,28 +129,53 @@ void addIndoorGraph(
         node.latitude,
         node.longitude,
       );
-      if (d <= entranceLinkMeters) candidates.add(NearestNode(node, d));
+
+      if (d <= entranceLinkMeters) {
+        candidates.add(NearestNode(node, d));
+      }
     }
+
     candidates.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+
     final from = LatLng(entrance.latitude, entrance.longitude);
-    // Join to the closest path point that can be reached without walking
-    // through a building.
+
+    var connected = false;
+
     for (final near in candidates) {
       final to = LatLng(near.node.latitude, near.node.longitude);
-      if (regions.segmentCrossesBuilding(from, to)) continue;
+
+      if (regions.segmentCrossesBuilding(from, to)) {
+        continue;
+      }
+
       graph.addEdge(
         entrance.id,
         near.node.id,
         distanceMeters: near.distanceMeters,
       );
+
+      debugPrint(
+        'Entrance ${entrance.id} connected '
+        'to ${near.node.id} '
+        '(${near.distanceMeters.toStringAsFixed(1)} m)',
+      );
+
+      connected = true;
       break;
+    }
+
+    if (!connected) {
+      debugPrint(
+        'WARNING: Entrance ${entrance.id} '
+        'has no outdoor connection.',
+      );
     }
   }
 }
 
 /// Loads the outdoor and indoor graphs from the app's assets.
 Future<CampusGraph> loadCampusGraph({
-  String outdoorAsset = 'assets/maps/campus_graph.json',
+  String outdoorAsset = 'assets/maps/campus_walkway_graph.json',
   String indoorAsset = 'assets/maps/campus_indoor_graph.json',
 }) async {
   final graph = parseCampusGraph(await rootBundle.loadString(outdoorAsset));
