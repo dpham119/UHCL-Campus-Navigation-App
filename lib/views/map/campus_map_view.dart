@@ -50,6 +50,8 @@ class CampusMapView extends StatefulWidget {
 class CampusMapViewState extends State<CampusMapView> {
   final MapController _mapController = MapController();
 
+  List<List<LatLng>> _walkwayPolygons = [];
+
   LatLng? _currentLocation;
   bool _isLocating = false;
 
@@ -104,6 +106,7 @@ class CampusMapViewState extends State<CampusMapView> {
     super.initState();
     _loadAllLayers();
     _loadGraph();
+    _loadWalkways();
   }
 
   Future<void> _loadGraph() async {
@@ -327,8 +330,10 @@ class CampusMapViewState extends State<CampusMapView> {
 
     if (from.node.id == to.node.id) {
       _clearRoute();
-      _showMessage('These two places share the same walkway point, so there '
-          'is nothing to route. Pick more specific places.');
+      _showMessage(
+        'These two places share the same walkway point, so there '
+        'is nothing to route. Pick more specific places.',
+      );
       return;
     }
 
@@ -365,8 +370,10 @@ class CampusMapViewState extends State<CampusMapView> {
     } on RouteException catch (error) {
       _clearRoute();
       if (error.error == RouteError.noPathFound && _accessibleOnly) {
-        _showMessage('No accessible route found. Turn off Accessible '
-            'Routing to see the regular route.');
+        _showMessage(
+          'No accessible route found. Turn off Accessible '
+          'Routing to see the regular route.',
+        );
       } else {
         _showMessage(error.message);
       }
@@ -654,6 +661,25 @@ class CampusMapViewState extends State<CampusMapView> {
     });
   }
 
+  List<Polygon> _buildWalkwayPolygons() {
+    if (_selectedLayer != 'Outdoor Campus') {
+      return [];
+    }
+
+    return _walkwayPolygons.map((points) {
+      return Polygon(
+        points: points,
+
+        // Gray sidewalk area.
+        color: const Color.fromARGB(255, 141, 87, 87).withValues(alpha: 0.28),
+
+        borderColor: Colors.grey.shade600,
+
+        borderStrokeWidth: 1.5,
+      );
+    }).toList();
+  }
+
   List<Polygon> _buildVisiblePolygons() {
     final List<Polygon> polygons = [];
 
@@ -849,6 +875,93 @@ class CampusMapViewState extends State<CampusMapView> {
     }
   }
 
+  Future<void> _loadWalkways() async {
+    try {
+      final jsonString = await rootBundle.loadString(
+        'assets/maps/campus_walkways.geojson',
+      );
+
+      final data = jsonDecode(jsonString) as Map<String, dynamic>;
+
+      final features = data['features'] as List<dynamic>? ?? [];
+
+      final polygons = <List<LatLng>>[];
+
+      for (final rawFeature in features) {
+        if (rawFeature is! Map<String, dynamic>) {
+          continue;
+        }
+
+        final geometry = rawFeature['geometry'] as Map<String, dynamic>?;
+
+        if (geometry == null) {
+          continue;
+        }
+
+        final type = geometry['type']?.toString();
+        final coordinates = geometry['coordinates'];
+
+        if (coordinates is! List) {
+          continue;
+        }
+
+        if (type == 'Polygon') {
+          _addWalkwayPolygon(coordinates, polygons);
+        } else if (type == 'MultiPolygon') {
+          for (final rawPolygon in coordinates) {
+            if (rawPolygon is List) {
+              _addWalkwayPolygon(rawPolygon, polygons);
+            }
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _walkwayPolygons = polygons;
+      });
+
+      debugPrint('Loaded ${polygons.length} outdoor walkway polygons');
+    } catch (error) {
+      debugPrint('Error loading outdoor walkways: $error');
+    }
+  }
+
+  void _addWalkwayPolygon(List<dynamic> polygon, List<List<LatLng>> result) {
+    if (polygon.isEmpty) {
+      return;
+    }
+
+    // First ring = outside edge of the sidewalk polygon.
+    final outerRing = polygon.first;
+
+    if (outerRing is! List) {
+      return;
+    }
+
+    final points = <LatLng>[];
+
+    for (final rawPoint in outerRing) {
+      if (rawPoint is! List || rawPoint.length < 2) {
+        continue;
+      }
+
+      final longitude = rawPoint[0];
+      final latitude = rawPoint[1];
+
+      if (longitude is! num || latitude is! num) {
+        continue;
+      }
+
+      points.add(LatLng(latitude.toDouble(), longitude.toDouble()));
+    }
+
+    if (points.length >= 3) {
+      result.add(points);
+    }
+  }
+
   // This point can later be passed to the routing engine.
   LatLng? get selectedStartingLocation =>
       _manualStartLocation ?? _currentLocation;
@@ -905,6 +1018,8 @@ class CampusMapViewState extends State<CampusMapView> {
               userAgentPackageName: 'com.example.uhcl_campus_navigation',
               maxNativeZoom: 19,
             ),
+            PolygonLayer(polygons: _buildWalkwayPolygons()),
+
             PolygonLayer(polygons: _buildVisiblePolygons()),
             if (_routeRuns.isNotEmpty)
               PolylineLayer(
@@ -1146,17 +1261,20 @@ class CampusMapViewState extends State<CampusMapView> {
       final first = _routeRuns.first;
       final last = _routeRuns.last;
       if (first.floor == layerFloor) {
-        markers.add(_routeMarker(
-            first.points.first, Icons.trip_origin, Colors.green, 32));
+        markers.add(
+          _routeMarker(first.points.first, Icons.trip_origin, Colors.green, 32),
+        );
       }
       if (last.floor == layerFloor) {
         markers.add(
-            _routeMarker(last.points.last, Icons.place, Colors.red, 36));
+          _routeMarker(last.points.last, Icons.place, Colors.red, 36),
+        );
       }
     } else if (_routeStart != null &&
         _featureFloor(_routeStart!) == layerFloor) {
-      markers.add(_routeMarker(
-          _routeStart!.center, Icons.trip_origin, Colors.green, 32));
+      markers.add(
+        _routeMarker(_routeStart!.center, Icons.trip_origin, Colors.green, 32),
+      );
     }
     return markers;
   }
@@ -1278,8 +1396,8 @@ class CampusMapViewState extends State<CampusMapView> {
                   label: const Text('Set as start'),
                 ),
                 FilledButton.icon(
-                  onPressed: _routeStart == null ||
-                          identical(_routeStart, feature)
+                  onPressed:
+                      _routeStart == null || identical(_routeStart, feature)
                       ? null
                       : () => _generateRoute(_routeStart!, feature),
                   icon: const Icon(Icons.directions_walk),
