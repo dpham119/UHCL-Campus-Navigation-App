@@ -1,0 +1,143 @@
+{
+ "_help": "Pin a room's door to a wall. Key = building, then room number. Value = [x, y] (local meters, same axes as the map images): the door goes on the room's wall nearest that point. Or {\"door\": [x, y], \"via\": [x, y]}: rooms sharing the same via form a T - each door joins the via point, and the via point joins the hallway line at a right angle. \"vertical_links\" adds stairs/elevators missing from the data: bottom and top are floor + [x, y]; each end joins the nearest hallway line.",
+ "604-DELTA BUILDING": {
+  "126": [
+   58.0,
+   -23.4
+  ],
+  "204": {
+   "door": [
+    44.21,
+    -22.11
+   ],
+   "via": [
+    45.63,
+    -22.78
+   ]
+  },
+  "203": {
+   "door": [
+    52.66,
+    -26.07
+   ],
+   "via": [
+    54.08,
+    -26.74
+   ]
+  },
+  "202": {
+   "door": [
+    61.11,
+    -30.04
+   ],
+   "via": [
+    62.53,
+    -30.71
+   ]
+  },
+  "205A": [
+   47.2,
+   -7.95
+  ],
+  "205B": [
+   49.38,
+   -3.78
+  ],
+  "201": [
+   69.4,
+   -33.9
+  ],
+  "241": {
+   "doors": [
+    [
+     83.2,
+     -45.3
+    ],
+    [
+     95.1,
+     -47.4
+    ]
+   ]
+  },
+  "237": {
+   "doors": [
+    [
+     92.3,
+     -41.0
+    ]
+   ]
+  },
+  "234": {
+   "doors": [
+    [
+     98.0,
+     -43.6
+    ],
+    [
+     103.4,
+     -39.4
+    ]
+   ]
+  },
+  "238": {
+   "doors": [
+    [
+     87.4,
+     -38.65
+    ],
+    [
+     85.8,
+     -36.8
+    ]
+   ]
+  }
+ },
+ "vertical_links": [
+  {
+   "_note": "Delta main hallway, upper stair leg: top on floor 2 where the leg meets the T's body, bottom on floor 1 at the leg's end",
+   "building": "604-DELTA BUILDING",
+   "type": "stairs",
+   "bottom": {
+    "floor": 1,
+    "xy": [
+     76.4,
+     -26.5
+    ]
+   },
+   "top": {
+    "floor": 2,
+    "xy": [
+     74.1,
+     -31.1
+    ]
+   }
+  },
+  {
+   "_note": "Delta main hallway, lower stair leg",
+   "building": "604-DELTA BUILDING",
+   "type": "stairs",
+   "bottom": {
+    "floor": 1,
+    "xy": [
+     72.0,
+     -38.8
+    ]
+   },
+   "top": {
+    "floor": 2,
+    "xy": [
+     73.0,
+     -33.5
+    ]
+   }
+  }
+ ],
+ "rules_buildings": [
+  "604-DELTA BUILDING"
+ ],
+ "open_rooms": {
+  "604-DELTA BUILDING": [
+   "205"
+  ]
+ }
+}
