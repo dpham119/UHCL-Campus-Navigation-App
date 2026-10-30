@@ -30,7 +30,9 @@ from scipy.spatial import cKDTree
 from shapely.geometry import Polygon, Point, LineString
 from shapely.ops import unary_union, nearest_points
 
-LAT0, LON0 = 29.578, -95.105
+# the GIS files were moved 1.35 m east / 2.65 m north to line up with OpenStreetMap (tools/align_layers.py);
+# the origin moves with them so the door hints in door_hints.json (meters) keep their meaning
+LAT0, LON0 = 29.578 + 2.65 / 110574.0, -95.105 + 1.35 / (111320 * math.cos(math.radians(29.578)))
 KX = 111320 * math.cos(math.radians(LAT0))
 KY = 110574.0
 CELL = 1.5                 # grid spacing in meters
