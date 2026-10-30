@@ -50,7 +50,7 @@ class CampusMapView extends StatefulWidget {
 class CampusMapViewState extends State<CampusMapView> {
   final MapController _mapController = MapController();
 
-  List<List<LatLng>> _walkwayPolygons = [];
+  List<Polygon> _walkwayPolygons = [];
 
   LatLng? _currentLocation;
   bool _isLocating = false;
@@ -666,18 +666,7 @@ class CampusMapViewState extends State<CampusMapView> {
       return [];
     }
 
-    return _walkwayPolygons.map((points) {
-      return Polygon(
-        points: points,
-
-        // Gray sidewalk area.
-        color: const Color.fromARGB(255, 141, 87, 87).withValues(alpha: 0.28),
-
-        borderColor: Colors.grey.shade600,
-
-        borderStrokeWidth: 1.5,
-      );
-    }).toList();
+    return _walkwayPolygons;
   }
 
   List<Polygon> _buildVisiblePolygons() {
@@ -885,7 +874,7 @@ class CampusMapViewState extends State<CampusMapView> {
 
       final features = data['features'] as List<dynamic>? ?? [];
 
-      final polygons = <List<LatLng>>[];
+      final polygons = <Polygon>[];
 
       for (final rawFeature in features) {
         if (rawFeature is! Map<String, dynamic>) {
@@ -906,11 +895,21 @@ class CampusMapViewState extends State<CampusMapView> {
         }
 
         if (type == 'Polygon') {
-          _addWalkwayPolygon(coordinates, polygons);
+          final polygon = _createWalkwayPolygon(coordinates);
+
+          if (polygon != null) {
+            polygons.add(polygon);
+          }
         } else if (type == 'MultiPolygon') {
           for (final rawPolygon in coordinates) {
-            if (rawPolygon is List) {
-              _addWalkwayPolygon(rawPolygon, polygons);
+            if (rawPolygon is! List) {
+              continue;
+            }
+
+            final polygon = _createWalkwayPolygon(rawPolygon);
+
+            if (polygon != null) {
+              polygons.add(polygon);
             }
           }
         }
@@ -928,21 +927,55 @@ class CampusMapViewState extends State<CampusMapView> {
     }
   }
 
-  void _addWalkwayPolygon(List<dynamic> polygon, List<List<LatLng>> result) {
-    if (polygon.isEmpty) {
-      return;
+  Polygon? _createWalkwayPolygon(List<dynamic> polygonCoordinates) {
+    if (polygonCoordinates.isEmpty) {
+      return null;
     }
 
-    // First ring = outside edge of the sidewalk polygon.
-    final outerRing = polygon.first;
+    // Ring 0 = outer boundary of the sidewalk area.
+    final outerRing = _readWalkwayRing(polygonCoordinates.first);
 
-    if (outerRing is! List) {
-      return;
+    if (outerRing.length < 3) {
+      return null;
+    }
+
+    // Rings 1+ = holes inside the polygon.
+    //
+    // These holes are extremely important for the UHCL sidewalk
+    // data. Without them, the entire area inside a large sidewalk
+    // boundary gets filled.
+    final holes = <List<LatLng>>[];
+
+    for (var i = 1; i < polygonCoordinates.length; i++) {
+      final hole = _readWalkwayRing(polygonCoordinates[i]);
+
+      if (hole.length >= 3) {
+        holes.add(hole);
+      }
+    }
+
+    return Polygon(
+      points: outerRing,
+
+      // These remove the non-sidewalk areas from the fill.
+      holePointsList: holes.isEmpty ? null : holes,
+
+      // Your temporary red shade.
+      color: const Color.fromARGB(255, 196, 194, 194).withValues(alpha: 0.28),
+
+      borderColor: Colors.grey.shade600,
+      borderStrokeWidth: 1.5,
+    );
+  }
+
+  List<LatLng> _readWalkwayRing(dynamic rawRing) {
+    if (rawRing is! List) {
+      return [];
     }
 
     final points = <LatLng>[];
 
-    for (final rawPoint in outerRing) {
+    for (final rawPoint in rawRing) {
       if (rawPoint is! List || rawPoint.length < 2) {
         continue;
       }
@@ -957,9 +990,7 @@ class CampusMapViewState extends State<CampusMapView> {
       points.add(LatLng(latitude.toDouble(), longitude.toDouble()));
     }
 
-    if (points.length >= 3) {
-      result.add(points);
-    }
+    return points;
   }
 
   // This point can later be passed to the routing engine.
