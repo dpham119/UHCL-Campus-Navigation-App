@@ -1,5 +1,6 @@
 import 'campus_graph.dart';
 import 'graph_edge.dart';
+import 'graph_node.dart';
 import 'min_priority_queue.dart';
 import 'route_result.dart';
 
@@ -13,10 +14,25 @@ class RouteGenerator {
 
   RouteGenerator(this.graph, {this.walkingSpeedMetersPerSecond = 1.4});
 
+  /// Edge filter for accessible routes. Pass it as `edgeFilter` to
+  /// [generate].
+  ///
+  /// An edge is allowed only if it is marked accessible AND neither end
+  /// is a stairs node. The second check matters because stair nodes also
+  /// have flat accessible edges to the corridor, so `edge.isAccessible`
+  /// alone would still let a route walk through a stairwell. Elevator
+  /// nodes and their floor-to-floor edges stay available, and outdoor
+  /// edges are unaffected.
+  bool Function(GraphEdge edge) get accessibleEdgeFilter => (edge) {
+    if (!edge.isAccessible) return false;
+    return graph.nodeById(edge.from)?.kind != NodeKind.stairs &&
+        graph.nodeById(edge.to)?.kind != NodeKind.stairs;
+  };
+
   /// Finds the shortest route from [startId] to [destinationId].
   ///
   /// Closed edges are never used. [edgeFilter] can exclude more edges,
-  /// for example `(edge) => edge.isAccessible` for an accessible route.
+  /// for example [accessibleEdgeFilter] for an accessible route.
   ///
   /// Throws [RouteException] if no route can be generated.
   RouteResult generate(

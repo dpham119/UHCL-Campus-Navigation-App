@@ -21,11 +21,13 @@ CampusGraph parseCampusGraph(String jsonText) {
 
   for (final item in data['nodes'] as List<dynamic>) {
     final node = item as List<dynamic>;
-    graph.addNode(GraphNode(
-      id: node[0] as String,
-      latitude: (node[1] as num).toDouble(),
-      longitude: (node[2] as num).toDouble(),
-    ));
+    graph.addNode(
+      GraphNode(
+        id: node[0] as String,
+        latitude: (node[1] as num).toDouble(),
+        longitude: (node[2] as num).toDouble(),
+      ),
+    );
   }
 
   for (final item in data['edges'] as List<dynamic>) {

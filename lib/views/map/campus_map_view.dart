@@ -338,10 +338,11 @@ class CampusMapViewState extends State<CampusMapView> {
     }
 
     try {
-      final result = RouteGenerator(graph).generate(
+      final generator = RouteGenerator(graph);
+      final result = generator.generate(
         from.node.id,
         to.node.id,
-        edgeFilter: _accessibleOnly ? (edge) => edge.isAccessible : null,
+        edgeFilter: _accessibleOnly ? generator.accessibleEdgeFilter : null,
       );
 
       final runs = _splitIntoRuns(
@@ -371,8 +372,7 @@ class CampusMapViewState extends State<CampusMapView> {
       _clearRoute();
       if (error.error == RouteError.noPathFound && _accessibleOnly) {
         _showMessage(
-          'No accessible route found. Turn off Accessible '
-          'Routing to see the regular route.',
+          'No accessible route is available between these locations.',
         );
       } else {
         _showMessage(error.message);

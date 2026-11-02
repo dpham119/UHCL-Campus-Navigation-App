@@ -10,10 +10,10 @@ class _Polygon {
   final double minLat, maxLat, minLon, maxLon;
 
   _Polygon(this.rings)
-      : minLat = rings.first.map((p) => p.latitude).reduce(math.min),
-        maxLat = rings.first.map((p) => p.latitude).reduce(math.max),
-        minLon = rings.first.map((p) => p.longitude).reduce(math.min),
-        maxLon = rings.first.map((p) => p.longitude).reduce(math.max);
+    : minLat = rings.first.map((p) => p.latitude).reduce(math.min),
+      maxLat = rings.first.map((p) => p.latitude).reduce(math.max),
+      minLon = rings.first.map((p) => p.longitude).reduce(math.min),
+      maxLon = rings.first.map((p) => p.longitude).reduce(math.max);
 
   bool contains(double lat, double lon) {
     if (lat < minLat || lat > maxLat || lon < minLon || lon > maxLon) {
@@ -55,13 +55,18 @@ class IndoorRegions {
     final result = IndoorRegions._();
     for (final item in (data['regions'] as List<dynamic>? ?? const [])) {
       final entry = item as List<dynamic>;
-      final key = _key(buildings[(entry[0] as num).toInt()], (entry[1] as num).toInt());
+      final key = _key(
+        buildings[(entry[0] as num).toInt()],
+        (entry[1] as num).toInt(),
+      );
       final rings = <List<LatLng>>[
         for (final ring in entry[2] as List<dynamic>)
           [
             for (final p in ring as List<dynamic>)
-              LatLng(((p as List<dynamic>)[0] as num).toDouble(),
-                  (p[1] as num).toDouble()),
+              LatLng(
+                ((p as List<dynamic>)[0] as num).toDouble(),
+                (p[1] as num).toDouble(),
+              ),
           ],
       ];
       if (rings.isEmpty || rings.first.length < 3) continue;
@@ -73,8 +78,10 @@ class IndoorRegions {
         for (final ring in entry[1] as List<dynamic>)
           [
             for (final p in ring as List<dynamic>)
-              LatLng(((p as List<dynamic>)[0] as num).toDouble(),
-                  (p[1] as num).toDouble()),
+              LatLng(
+                ((p as List<dynamic>)[0] as num).toDouble(),
+                (p[1] as num).toDouble(),
+              ),
           ],
       ];
       if (rings.isEmpty || rings.first.length < 3) continue;

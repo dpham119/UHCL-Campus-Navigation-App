@@ -17,12 +17,7 @@ class RouteResult {
   GraphNode get destination => path.last;
 }
 
-enum RouteError {
-  emptyGraph,
-  unknownStart,
-  unknownDestination,
-  noPathFound,
-}
+enum RouteError { emptyGraph, unknownStart, unknownDestination, noPathFound }
 
 /// Thrown when a route cannot be generated. Show [message] to the user.
 class RouteException implements Exception {

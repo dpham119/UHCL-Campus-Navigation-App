@@ -34,31 +34,38 @@ class CampusGraph {
     final from = _nodes[fromId];
     final to = _nodes[toId];
     if (from == null || to == null) {
-      throw ArgumentError('Both nodes must be added before the edge: '
-          '$fromId -> $toId');
+      throw ArgumentError(
+        'Both nodes must be added before the edge: '
+        '$fromId -> $toId',
+      );
     }
-    final distance = distanceMeters ??
+    final distance =
+        distanceMeters ??
         haversineMeters(
           from.latitude,
           from.longitude,
           to.latitude,
           to.longitude,
         );
-    _edges[fromId]!.add(GraphEdge(
-      from: fromId,
-      to: toId,
-      distanceMeters: distance,
-      isAccessible: isAccessible,
-      isClosed: isClosed,
-    ));
-    if (bidirectional) {
-      _edges[toId]!.add(GraphEdge(
-        from: toId,
-        to: fromId,
+    _edges[fromId]!.add(
+      GraphEdge(
+        from: fromId,
+        to: toId,
         distanceMeters: distance,
         isAccessible: isAccessible,
         isClosed: isClosed,
-      ));
+      ),
+    );
+    if (bidirectional) {
+      _edges[toId]!.add(
+        GraphEdge(
+          from: toId,
+          to: fromId,
+          distanceMeters: distance,
+          isAccessible: isAccessible,
+          isClosed: isClosed,
+        ),
+      );
     }
   }
 
