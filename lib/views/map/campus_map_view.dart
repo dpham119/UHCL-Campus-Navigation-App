@@ -17,6 +17,7 @@ class CampusFeature {
   final String building;
   final String floor;
   final String department;
+  final String occupant;
   final String roomUse;
   final String featureType;
 
@@ -30,6 +31,7 @@ class CampusFeature {
     required this.building,
     required this.floor,
     required this.department,
+    required this.occupant,
     required this.roomUse,
     required this.featureType,
     required this.polygons,
@@ -55,9 +57,9 @@ class CampusMapViewState extends State<CampusMapView> {
   LatLng? _currentLocation;
   bool _isLocating = false;
 
-  // User-selected starting point, independent of the GPS marker.
-  LatLng? _manualStartLocation;
-  bool _isSelectingManualLocation = false;
+  // // User-selected starting point, independent of the GPS marker.
+  // LatLng? _manualStartLocation;
+  // bool _isSelectingManualLocation = false;
 
   List<CampusFeature> _buildings = [];
   List<CampusFeature> _parkingLots = [];
@@ -83,7 +85,8 @@ class CampusMapViewState extends State<CampusMapView> {
   // Room nodes sit exactly at the room's center, so they should match.
   static const double _maxRoomSnapMeters = 10;
 
-  LatLng _campusCenter = const LatLng(29.5776, -95.1000);
+  // Delta Building center, calculated from campus_buildings.geojson.
+  LatLng _campusCenter = const LatLng(29.57775456, -95.10422982);
 
   String _selectedLayer = 'Outdoor Campus';
   bool _showLabels = true;
@@ -416,8 +419,16 @@ class CampusMapViewState extends State<CampusMapView> {
         _secondFloor = floor2;
         _thirdFloor = floor3;
 
-        if (_buildings.isNotEmpty) {
-          _campusCenter = _averageCenter(_buildings);
+        // if (_buildings.isNotEmpty) {
+        //   _campusCenter = _averageCenter(_buildings);
+        // }
+        // Keep the Center Map action focused on Delta Building.
+        for (final building in _buildings) {
+          if (building.code.toUpperCase() == 'DELTA' ||
+              building.name.toLowerCase().contains('delta building')) {
+            _campusCenter = building.center;
+            break;
+          }
         }
 
         _isLoading = false;
@@ -510,6 +521,7 @@ class CampusMapViewState extends State<CampusMapView> {
           building: _readProperty(properties, ['Building', 'BuildingName'], ''),
           floor: _readProperty(properties, ['Floor'], ''),
           department: _readProperty(properties, ['Department'], ''),
+          occupant: _readProperty(properties, ['Occupant'], ''),
           roomUse: _readProperty(properties, ['Use_'], ''),
           featureType: featureType,
           polygons: polygons,
@@ -716,6 +728,8 @@ class CampusMapViewState extends State<CampusMapView> {
     if (!outdoor && _currentZoom < _roomLabelZoom) {
       return [];
     }
+    // Reduce label clutter at lower zoom levels.
+    if (outdoor && _currentZoom < 17) return [];
 
     final List<CampusFeature> labelFeatures = outdoor
         ? _buildings
@@ -726,7 +740,34 @@ class CampusMapViewState extends State<CampusMapView> {
               )
               .toList();
 
-    return labelFeatures.map((feature) {
+    // return labelFeatures.map((feature) {
+    // Keep only one label in each small geographic neighborhood. This avoids
+    // stacked labels for overlapping room/building centers at the same zoom.
+    final visibleLabels = <CampusFeature>[];
+    final minSpacingMeters = outdoor
+        ? (_currentZoom >= 19
+              ? 8.0
+              : _currentZoom >= 18
+              ? 20.0
+              : 38.0)
+        : (_currentZoom >= 19 ? 3.0 : 8.0);
+    for (final feature in labelFeatures) {
+      final tooClose = visibleLabels.any(
+        (existing) =>
+            Geolocator.distanceBetween(
+              feature.center.latitude,
+              feature.center.longitude,
+              existing.center.latitude,
+              existing.center.longitude,
+            ) <
+            minSpacingMeters,
+      );
+      if (!tooClose || identical(feature, _selectedFeature)) {
+        visibleLabels.add(feature);
+      }
+    }
+
+    return visibleLabels.map((feature) {
       final String label = outdoor ? feature.name : feature.code;
 
       return Marker(
@@ -768,7 +809,7 @@ class CampusMapViewState extends State<CampusMapView> {
     }).toList();
   }
 
-  /// Opens the building/room search. Called from the home screen's
+  /// Opens the building/room/faculty search. Called from the home screen's
   /// search bar.
   void openSearch() {
     if (_isLoading) return;
@@ -993,23 +1034,23 @@ class CampusMapViewState extends State<CampusMapView> {
     return points;
   }
 
-  // This point can later be passed to the routing engine.
-  LatLng? get selectedStartingLocation =>
-      _manualStartLocation ?? _currentLocation;
+  // // This point can later be passed to the routing engine.
+  // LatLng? get selectedStartingLocation =>
+  //     _manualStartLocation ?? _currentLocation;
 
-  void _setManualStartLocation(LatLng location) {
-    setState(() {
-      _manualStartLocation = location;
-      _isSelectingManualLocation = false;
-    });
+  // void _setManualStartLocation(LatLng location) {
+  //   setState(() {
+  //     _manualStartLocation = location;
+  //     _isSelectingManualLocation = false;
+  //   });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Manual starting location selected!'),
-        duration: Duration(seconds: 3),
-      ),
-    );
-  }
+  //   ScaffoldMessenger.of(context).showSnackBar(
+  //     const SnackBar(
+  //       content: Text('Manual starting location selected!'),
+  //       duration: Duration(seconds: 3),
+  //     ),
+  //   );
+  // }
 
   @override
   Widget build(BuildContext context) {
@@ -1022,7 +1063,7 @@ class CampusMapViewState extends State<CampusMapView> {
           mapController: _mapController,
           options: MapOptions(
             initialCenter: _campusCenter,
-            initialZoom: 16,
+            initialZoom: 18,
             minZoom: 13,
             maxZoom: 20,
             onPositionChanged: (camera, hasGesture) {
@@ -1036,11 +1077,12 @@ class CampusMapViewState extends State<CampusMapView> {
               }
             },
             onTap: (tapPosition, point) {
-              if (_isSelectingManualLocation) {
-                _setManualStartLocation(point);
-              } else {
-                _selectFeatureAt(point);
-              }
+              // if (_isSelectingManualLocation) {
+              //   _setManualStartLocation(point);
+              // } else {
+              //   _selectFeatureAt(point);
+              // }
+              _selectFeatureAt(point);
             },
           ),
           children: [
@@ -1068,7 +1110,7 @@ class CampusMapViewState extends State<CampusMapView> {
               ),
             MarkerLayer(markers: _buildRouteMarkers()),
             MarkerLayer(markers: _buildLabels()),
-            if (_currentLocation != null)
+            if (_currentLocation != null && _route == null)
               MarkerLayer(
                 markers: [
                   Marker(
@@ -1083,21 +1125,21 @@ class CampusMapViewState extends State<CampusMapView> {
                   ),
                 ],
               ),
-            if (_manualStartLocation != null)
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: _manualStartLocation!,
-                    width: 45,
-                    height: 45,
-                    child: const Icon(
-                      Icons.location_on,
-                      color: Colors.green,
-                      size: 40,
-                    ),
-                  ),
-                ],
-              ),
+            // if (_manualStartLocation != null)
+            //   MarkerLayer(
+            //     markers: [
+            //       Marker(
+            //         point: _manualStartLocation!,
+            //         width: 45,
+            //         height: 45,
+            //         child: const Icon(
+            //           Icons.location_on,
+            //           color: Colors.green,
+            //           size: 40,
+            //         ),
+            //       ),
+            //     ],
+            //   ),
             RichAttributionWidget(
               attributions: [
                 TextSourceAttribution(
@@ -1162,7 +1204,7 @@ class CampusMapViewState extends State<CampusMapView> {
                   tooltip: 'Center map',
                   icon: const Icon(Icons.center_focus_strong),
                   onPressed: () {
-                    _mapController.move(_campusCenter, 16);
+                    _mapController.move(_campusCenter, 18);
                   },
                 ),
                 IconButton(
@@ -1176,28 +1218,28 @@ class CampusMapViewState extends State<CampusMapView> {
                       : const Icon(Icons.my_location),
                   onPressed: _isLocating ? null : _getCurrentLocation,
                 ),
-                IconButton(
-                  tooltip: 'Set manual starting location',
-                  icon: Icon(
-                    Icons.add_location_alt,
-                    color: _isSelectingManualLocation ? Colors.green : null,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _isSelectingManualLocation = !_isSelectingManualLocation;
-                    });
-                    if (_isSelectingManualLocation) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Tap anywhere on the map to select your starting location.',
-                          ),
-                          duration: Duration(seconds: 3),
-                        ),
-                      );
-                    }
-                  },
-                ),
+                // IconButton(
+                //   tooltip: 'Set manual starting location',
+                //   icon: Icon(
+                //     Icons.add_location_alt,
+                //     color: _isSelectingManualLocation ? Colors.green : null,
+                //   ),
+                //   onPressed: () {
+                //     setState(() {
+                //       _isSelectingManualLocation = !_isSelectingManualLocation;
+                //     });
+                //     if (_isSelectingManualLocation) {
+                //       ScaffoldMessenger.of(context).showSnackBar(
+                //         const SnackBar(
+                //           content: Text(
+                //             'Tap anywhere on the map to select your starting location.',
+                //           ),
+                //           duration: Duration(seconds: 3),
+                //         ),
+                //       );
+                //     }
+                //   },
+                // ),
               ],
             ),
           ),
@@ -1233,15 +1275,20 @@ class CampusMapViewState extends State<CampusMapView> {
             ),
           ),
 
-        if (_route != null)
+        // Show route summary at the bottom, not over the search/layer controls.
+        // The selected-feature details card takes priority when open.
+        if (_route != null && _selectedFeature == null)
           Positioned(
-            top: 64,
+            //top: 64,
             left: 12,
-            right: 60,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: _buildRouteCard(),
-            ),
+            //right: 60,
+            // child: Align(
+            //   alignment: Alignment.centerLeft,
+            //   child: _buildRouteCard(),
+            // ),
+            right: 12,
+            bottom: 12,
+            child: _buildRouteCard(),
           ),
 
         if (_selectedFeature != null)
@@ -1252,7 +1299,10 @@ class CampusMapViewState extends State<CampusMapView> {
             child: _buildDetailsCard(),
           ),
 
-        if (!_isLoading && _errorMessage == null && _selectedFeature == null)
+        if (!_isLoading &&
+            _errorMessage == null &&
+            _selectedFeature == null &&
+            _route == null)
           Positioned(
             left: 12,
             bottom: 12,
@@ -1404,20 +1454,32 @@ class CampusMapViewState extends State<CampusMapView> {
                 ),
               ],
             ),
-            if (isRoom && feature.name.isNotEmpty)
-              Text('Name: ${feature.name}'),
-            if (!isRoom && feature.code.isNotEmpty)
-              Text('Code: ${feature.code}'),
-            if (feature.building.isNotEmpty)
-              Text('Building: ${feature.building}'),
-            if (feature.floor.isNotEmpty) Text('Floor: ${feature.floor}'),
-            if (feature.department.isNotEmpty && feature.department != '-')
-              Text('Department: ${feature.department}'),
-            if (feature.roomUse.isNotEmpty) Text('Use: ${feature.roomUse}'),
-            if (feature.address.isNotEmpty) Text('Address: ${feature.address}'),
+            if (isRoom) ...[
+              Text(
+                'Building: ${feature.building.isNotEmpty ? feature.building : "Not available"}',
+              ),
+              Text(
+                'Floor: ${feature.floor.isNotEmpty ? feature.floor : "Not available"}',
+              ),
+              Text(
+                'Faculty / Occupant: ${feature.occupant.isNotEmpty && feature.occupant != "-" ? feature.occupant : "Not listed"}',
+              ),
+            ] else ...[
+              if (feature.code.isNotEmpty) Text('Code: ${feature.code}'),
+              if (feature.building.isNotEmpty)
+                Text('Building: ${feature.building}'),
+              if (feature.floor.isNotEmpty) Text('Floor: ${feature.floor}'),
+              if (feature.department.isNotEmpty && feature.department != '-')
+                Text('Department: ${feature.department}'),
+              if (feature.roomUse.isNotEmpty) Text('Use: ${feature.roomUse}'),
+              if (feature.address.isNotEmpty)
+                Text('Address: ${feature.address}'),
+              if (_routeStart != null)
+                Text('Start: ${_featureLabel(_routeStart!)}'),
+            ],
             const SizedBox(height: 8),
-            if (_routeStart != null)
-              Text('Start: ${_featureLabel(_routeStart!)}'),
+            // if (_routeStart != null)
+            //   Text('Start: ${_featureLabel(_routeStart!)}'),
             Wrap(
               spacing: 8,
               children: [
@@ -1443,15 +1505,15 @@ class CampusMapViewState extends State<CampusMapView> {
   }
 }
 
-// Search interface for buildings, parking lots, and rooms.
+// Search interface for buildings, room numbers, faculty/occupants, and departments.
 class CampusSearchDelegate extends SearchDelegate<CampusFeature?> {
   final List<CampusFeature> features;
 
   CampusSearchDelegate(this.features);
 
   @override
-  String get searchFieldLabel => 'Search buildings or room numbers';
-
+  //String get searchFieldLabel => 'Search buildings or room numbers';
+  String get searchFieldLabel => 'Search buildings, rooms, or faculty';
   @override
   List<Widget> buildActions(BuildContext context) {
     return [
@@ -1488,14 +1550,20 @@ class CampusSearchDelegate extends SearchDelegate<CampusFeature?> {
     final searchText = query.trim().toLowerCase();
 
     if (searchText.isEmpty) {
-      return const Center(child: Text('Enter a building name or room number.'));
+      //return const Center(child: Text('Enter a building name or room number.'));
+      return const Center(
+        child: Text('Search a building, room number, or faculty name.'),
+      );
     }
 
     final matches = features
         .where((feature) {
           return feature.name.toLowerCase().contains(searchText) ||
               feature.code.toLowerCase().contains(searchText) ||
-              feature.building.toLowerCase().contains(searchText);
+              //feature.building.toLowerCase().contains(searchText);
+              feature.building.toLowerCase().contains(searchText) ||
+              feature.occupant.toLowerCase().contains(searchText) ||
+              feature.department.toLowerCase().contains(searchText);
         })
         .take(100)
         .toList();
@@ -1509,12 +1577,24 @@ class CampusSearchDelegate extends SearchDelegate<CampusFeature?> {
       itemBuilder: (context, index) {
         final feature = matches[index];
 
-        final String title = feature.featureType == 'room'
+        // final String title = feature.featureType == 'room'
+        //     ? 'Room ${feature.code.isNotEmpty ? feature.code : "Unknown"}'
+        //     : feature.name;
+        final bool facultyMatch =
+            feature.featureType == 'room' &&
+            feature.occupant.isNotEmpty &&
+            feature.occupant.toLowerCase().contains(searchText);
+
+        final String title = facultyMatch
+            ? feature.occupant
+            : feature.featureType == 'room'
             ? 'Room ${feature.code.isNotEmpty ? feature.code : "Unknown"}'
             : feature.name;
 
         final String subtitle = feature.featureType == 'room'
-            ? '${feature.building} • Floor ${feature.floor}'
+            // ? '${feature.building} • Floor ${feature.floor}'
+            ? '${feature.building} • Floor ${feature.floor} • Room ${feature.code}'
+                  '${feature.occupant.isNotEmpty && !facultyMatch ? ' • ${feature.occupant}' : ''}'
             : feature.featureType == 'parking'
             ? 'Parking Lot'
             : 'Campus Building';
