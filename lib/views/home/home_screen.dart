@@ -14,10 +14,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final GlobalKey<CampusMapViewState> _mapKey = GlobalKey<CampusMapViewState>();
 
-  void _openDirections() {
-    Navigator.pushNamed(context, '/directions');
-  }
-
   void _openSettings() {
     Navigator.pushNamed(context, '/settings');
   }
@@ -95,15 +91,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   onTap: () {
                     // Already on the map screen.
                   },
-                ),
-              ),
-
-              // DIRECTIONS
-              Expanded(
-                child: _BottomNavigationItem(
-                  icon: Icons.directions_outlined,
-                  label: 'Directions',
-                  onTap: _openDirections,
                 ),
               ),
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -57,6 +58,10 @@ class CampusMapViewState extends State<CampusMapView> {
   LatLng? _currentLocation;
   bool _isLocating = false;
 
+  StreamSubscription<Position>? _navigationSubscription;
+  bool _isNavigating = false;
+  bool _followUser = true;
+
   // // User-selected starting point, independent of the GPS marker.
   // LatLng? _manualStartLocation;
   // bool _isSelectingManualLocation = false;
@@ -112,6 +117,13 @@ class CampusMapViewState extends State<CampusMapView> {
     _loadWalkways();
   }
 
+  @override
+  void dispose() {
+    _navigationSubscription?.cancel();
+    _mapController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadGraph() async {
     try {
       final graph = await loadCampusGraph();
@@ -154,6 +166,7 @@ class CampusMapViewState extends State<CampusMapView> {
   }
 
   void _clearRoute() {
+    _stopLiveNavigation();
     setState(() {
       _route = null;
       _routeDestination = null;
@@ -316,6 +329,7 @@ class CampusMapViewState extends State<CampusMapView> {
   }
 
   void _generateRoute(CampusFeature start, CampusFeature destination) {
+    _stopLiveNavigation();
     final graph = _graph;
     if (graph == null) {
       _showMessage('Route data is still loading. Try again in a moment.');
@@ -905,6 +919,75 @@ class CampusMapViewState extends State<CampusMapView> {
     }
   }
 
+  /// Starts foreground GPS tracking only while a route is selected.
+  Future<void> _startLiveNavigation() async {
+    if (_route == null || _isNavigating) return;
+
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        _showMessage('Enable location services to start navigation.');
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        _showMessage('Location permission is required for live navigation.');
+        return;
+      }
+
+      await _navigationSubscription?.cancel();
+      if (!mounted || _route == null) return;
+
+      setState(() {
+        _isNavigating = true;
+        _followUser = true;
+        _selectedLayer = 'Outdoor Campus';
+      });
+
+      _navigationSubscription = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 3,
+        ),
+      ).listen(
+        (position) {
+          if (!mounted || !_isNavigating) return;
+          final location = LatLng(position.latitude, position.longitude);
+          setState(() => _currentLocation = location);
+          if (_followUser && _selectedLayer == 'Outdoor Campus') {
+            _mapController.move(location, _mapController.camera.zoom);
+          }
+        },
+        onError: (Object error) {
+          if (!mounted) return;
+          _stopLiveNavigation();
+          _showMessage('Live GPS error: $error');
+        },
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _stopLiveNavigation();
+      _showMessage('Unable to start navigation: $error');
+    }
+  }
+
+  void _stopLiveNavigation() {
+    final subscription = _navigationSubscription;
+    _navigationSubscription = null;
+    subscription?.cancel();
+    if (!mounted) return;
+    if (_isNavigating || _followUser) {
+      setState(() {
+        _isNavigating = false;
+        _followUser = false;
+      });
+    }
+  }
+
   Future<void> _loadWalkways() async {
     try {
       final jsonString = await rootBundle.loadString(
@@ -1067,6 +1150,9 @@ class CampusMapViewState extends State<CampusMapView> {
             minZoom: 13,
             maxZoom: 20,
             onPositionChanged: (camera, hasGesture) {
+              if (hasGesture && _isNavigating && _followUser) {
+                setState(() => _followUser = false);
+              }
               if ((_currentZoom >= _roomLabelZoom) !=
                   (camera.zoom >= _roomLabelZoom)) {
                 setState(() {
@@ -1110,7 +1196,7 @@ class CampusMapViewState extends State<CampusMapView> {
               ),
             MarkerLayer(markers: _buildRouteMarkers()),
             MarkerLayer(markers: _buildLabels()),
-            if (_currentLocation != null && _route == null)
+            if (_currentLocation != null && _selectedLayer == 'Outdoor Campus')
               MarkerLayer(
                 markers: [
                   Marker(
@@ -1408,6 +1494,31 @@ class CampusMapViewState extends State<CampusMapView> {
                       ),
                   ],
                 ),
+              ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _isNavigating
+                    ? _stopLiveNavigation
+                    : _startLiveNavigation,
+                icon: Icon(_isNavigating ? Icons.stop_circle : Icons.navigation),
+                label: Text(_isNavigating ? 'Stop Navigation' : 'Start Navigation'),
+              ),
+            ),
+            if (_isNavigating && !_followUser)
+              TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _followUser = true;
+                    _selectedLayer = 'Outdoor Campus';
+                  });
+                  if (_currentLocation != null) {
+                    _mapController.move(_currentLocation!, 19);
+                  }
+                },
+                icon: const Icon(Icons.my_location),
+                label: const Text('Follow my location'),
               ),
           ],
         ),
