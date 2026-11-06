@@ -958,7 +958,7 @@ class CampusMapViewState extends State<CampusMapView> {
           if (!mounted || !_isNavigating) return;
           final location = LatLng(position.latitude, position.longitude);
           setState(() => _currentLocation = location);
-          if (_followUser && _selectedLayer == 'Outdoor Campus') {
+          if (_followUser) {
             _mapController.move(location, _mapController.camera.zoom);
           }
         },
@@ -1196,7 +1196,7 @@ class CampusMapViewState extends State<CampusMapView> {
               ),
             MarkerLayer(markers: _buildRouteMarkers()),
             MarkerLayer(markers: _buildLabels()),
-            if (_currentLocation != null && _selectedLayer == 'Outdoor Campus')
+            if (_currentLocation != null)
               MarkerLayer(
                 markers: [
                   Marker(
