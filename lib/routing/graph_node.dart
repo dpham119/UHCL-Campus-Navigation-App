@@ -22,6 +22,11 @@ class GraphNode {
   /// `Building` field). Empty for outdoor nodes.
   final String building;
 
+  /// For a room node that sits on its door: the room's own center, which is
+  /// how the map finds the node for a room. Null means the node's own spot.
+  final double? anchorLatitude;
+  final double? anchorLongitude;
+
   const GraphNode({
     required this.id,
     required this.latitude,
@@ -31,6 +36,8 @@ class GraphNode {
     this.floor = 0,
     this.kind = NodeKind.outdoor,
     this.building = '',
+    this.anchorLatitude,
+    this.anchorLongitude,
   });
 
   @override

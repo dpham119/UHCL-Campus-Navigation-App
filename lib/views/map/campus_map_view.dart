@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -261,6 +262,7 @@ class CampusMapViewState extends State<CampusMapView> {
             node.kind == NodeKind.room &&
             node.floor == floor &&
             node.building == feature.building,
+        byAnchor: true,
       );
       if (found != null && found.distanceMeters <= _maxRoomSnapMeters) {
         return found;
@@ -328,6 +330,27 @@ class CampusMapViewState extends State<CampusMapView> {
     return runs;
   }
 
+  /// Every door node of a room (they share the room's center). Other
+  /// features have just the one node.
+  List<GraphNode> _doorsOf(
+    CampusGraph graph,
+    CampusFeature feature,
+    GraphNode primary,
+  ) {
+    if (feature.featureType != 'room') return [primary];
+    final lat = primary.anchorLatitude ?? primary.latitude;
+    final lon = primary.anchorLongitude ?? primary.longitude;
+    return [
+      for (final n in graph.nodes)
+        if (n.kind == NodeKind.room &&
+            n.floor == primary.floor &&
+            n.building == primary.building &&
+            ((n.anchorLatitude ?? n.latitude) - lat).abs() < 1e-7 &&
+            ((n.anchorLongitude ?? n.longitude) - lon).abs() < 1e-7)
+          n,
+    ];
+  }
+
   void _generateRoute(CampusFeature start, CampusFeature destination) {
     _stopLiveNavigation();
     final graph = _graph;
@@ -356,11 +379,33 @@ class CampusMapViewState extends State<CampusMapView> {
 
     try {
       final generator = RouteGenerator(graph);
-      final result = generator.generate(
-        from.node.id,
-        to.node.id,
-        edgeFilter: _accessibleOnly ? generator.accessibleEdgeFilter : null,
-      );
+      // A room with more than one door: try every door, keep the shortest.
+      RouteResult? best;
+      RouteException? lastError;
+      for (final a in _doorsOf(graph, start, from.node)) {
+        for (final b in _doorsOf(graph, destination, to.node)) {
+          if (a.id == b.id) continue;
+          try {
+            final candidate = generator.generate(
+              a.id,
+              b.id,
+              edgeFilter:
+                  _accessibleOnly ? generator.accessibleEdgeFilter : null,
+            );
+            if (best == null ||
+                candidate.distanceMeters < best.distanceMeters) {
+              best = candidate;
+            }
+          } on RouteException catch (error) {
+            lastError = error;
+          }
+        }
+      }
+      final result = best;
+      if (result == null) {
+        throw lastError ??
+            const RouteException(RouteError.noPathFound, 'No route found.');
+      }
 
       final runs = _splitIntoRuns(
         result.path,
@@ -733,6 +778,28 @@ class CampusMapViewState extends State<CampusMapView> {
     return polygons;
   }
 
+  /// Rough size of a feature (its bounding box), so bigger rooms get their
+  /// label placed first.
+  final Map<CampusFeature, double> _areaCache = {};
+
+  double _featureArea(CampusFeature feature) =>
+      _areaCache.putIfAbsent(feature, () => _computeArea(feature));
+
+  double _computeArea(CampusFeature feature) {
+    var minLat = double.infinity, maxLat = -double.infinity;
+    var minLon = double.infinity, maxLon = -double.infinity;
+    for (final ring in feature.polygons) {
+      for (final p in ring) {
+        if (p.latitude < minLat) minLat = p.latitude;
+        if (p.latitude > maxLat) maxLat = p.latitude;
+        if (p.longitude < minLon) minLon = p.longitude;
+        if (p.longitude > maxLon) maxLon = p.longitude;
+      }
+    }
+    if (minLat > maxLat) return 0;
+    return (maxLat - minLat) * (maxLon - minLon);
+  }
+
   List<Marker> _buildLabels() {
     if (!_showLabels) return [];
 
@@ -754,45 +821,70 @@ class CampusMapViewState extends State<CampusMapView> {
               )
               .toList();
 
-    // return labelFeatures.map((feature) {
-    // Keep only one label in each small geographic neighborhood. This avoids
-    // stacked labels for overlapping room/building centers at the same zoom.
+    // Labels grow with the zoom and are thinned out on screen: a label is
+    // only drawn if it would not cover one that is already placed.
+    final double zoom = _currentZoom;
+    final double metersPerPixel =
+        156543.03392 *
+        math.cos(_campusCenter.latitude * math.pi / 180) /
+        math.pow(2, zoom);
+    final double fontSize = outdoor
+        ? (9.0 + (zoom - 17) * 1.5).clamp(9.0, 13.0).toDouble()
+        : (zoom >= 19.5
+              ? 8.5
+              : (6.0 + (zoom - 18) * 2.0).clamp(6.0, 11.5).toDouble());
+    final double mPerDegLat = 110574.0;
+    final double mPerDegLon =
+        111320.0 * math.cos(_campusCenter.latitude * math.pi / 180);
+
+    final ordered = <CampusFeature>[
+      if (_selectedFeature != null && labelFeatures.contains(_selectedFeature))
+        _selectedFeature!,
+      ...(labelFeatures.where((f) => !identical(f, _selectedFeature)).toList()
+        ..sort((a, b) => _featureArea(b).compareTo(_featureArea(a)))),
+    ];
+    // Fully zoomed in, labels may touch a little so every room shows.
+    final double overlapAllowed = zoom >= 20
+        ? 0.5
+        : zoom >= 19.5
+        ? 0.75
+        : 1.0;
+
+    final placed = <_LabelBox>[];
     final visibleLabels = <CampusFeature>[];
-    final minSpacingMeters = outdoor
-        ? (_currentZoom >= 19
-              ? 8.0
-              : _currentZoom >= 18
-              ? 20.0
-              : 38.0)
-        : (_currentZoom >= 19 ? 3.0 : 8.0);
-    for (final feature in labelFeatures) {
-      final tooClose = visibleLabels.any(
-        (existing) =>
-            Geolocator.distanceBetween(
-              feature.center.latitude,
-              feature.center.longitude,
-              existing.center.latitude,
-              existing.center.longitude,
-            ) <
-            minSpacingMeters,
-      );
-      if (!tooClose || identical(feature, _selectedFeature)) {
+    final sizes = <CampusFeature, Size>{};
+    for (final feature in ordered) {
+      final String label = outdoor ? feature.name : feature.code;
+      final double width = outdoor
+          ? math.min(150.0, label.length * fontSize * 0.6 + 12)
+          : label.length * fontSize * 0.62 + 10;
+      final double height = fontSize * (outdoor ? 2.0 : 1.0) + 8;
+      final double cx =
+          feature.center.longitude * mPerDegLon / metersPerPixel;
+      final double cy =
+          feature.center.latitude * mPerDegLat / metersPerPixel;
+      final box = _LabelBox(cx, cy, width, height);
+      final clash = placed.any((p) => p.overlaps(box, overlapAllowed));
+      if (!clash) {
+        placed.add(box);
         visibleLabels.add(feature);
+        sizes[feature] = Size(width, height);
       }
     }
 
     return visibleLabels.map((feature) {
       final String label = outdoor ? feature.name : feature.code;
+      final size = sizes[feature]!;
 
       return Marker(
         point: feature.center,
-        width: outdoor ? 150 : 80,
-        height: outdoor ? 42 : 26,
+        width: size.width,
+        height: size.height,
         child: GestureDetector(
           onTap: () => _selectFeature(feature),
           child: Center(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
               decoration: BoxDecoration(
                 color: identical(feature, _selectedFeature)
                     ? Colors.orange.shade100
@@ -811,7 +903,7 @@ class CampusMapViewState extends State<CampusMapView> {
                 maxLines: outdoor ? 2 : 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: outdoor ? 10 : 9,
+                  fontSize: fontSize,
                   fontWeight: FontWeight.bold,
                   color: Colors.black87,
                 ),
@@ -1154,7 +1246,8 @@ class CampusMapViewState extends State<CampusMapView> {
                 setState(() => _followUser = false);
               }
               if ((_currentZoom >= _roomLabelZoom) !=
-                  (camera.zoom >= _roomLabelZoom)) {
+                      (camera.zoom >= _roomLabelZoom) ||
+                  (_currentZoom * 2).floor() != (camera.zoom * 2).floor()) {
                 setState(() {
                   _currentZoom = camera.zoom;
                 });
@@ -1383,27 +1476,6 @@ class CampusMapViewState extends State<CampusMapView> {
             right: 12,
             bottom: 12,
             child: _buildDetailsCard(),
-          ),
-
-        if (!_isLoading &&
-            _errorMessage == null &&
-            _selectedFeature == null &&
-            _route == null)
-          Positioned(
-            left: 12,
-            bottom: 12,
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Text(
-                  'Features: ${_visibleFeatures.length}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
           ),
       ],
     );
@@ -1736,4 +1808,19 @@ class _RouteRun {
   final List<LatLng> points;
 
   _RouteRun(this.floor, this.building, this.points);
+}
+
+/// A label's rectangle in screen pixels, used to keep labels from overlapping.
+class _LabelBox {
+  final double cx;
+  final double cy;
+  final double width;
+  final double height;
+
+  const _LabelBox(this.cx, this.cy, this.width, this.height);
+
+  bool overlaps(_LabelBox other, double factor) {
+    return (cx - other.cx).abs() < (width + other.width) / 2 * factor + 1 &&
+        (cy - other.cy).abs() < (height + other.height) / 2 * factor + 1;
+  }
 }

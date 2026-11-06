@@ -86,6 +86,8 @@ void addIndoorGraph(
       floor: (n[2] as num).toInt(),
       kind: _kindFromCode((n[3] as num).toInt()),
       building: buildings[(n[4] as num).toInt()],
+      anchorLatitude: n.length >= 7 ? (n[5] as num).toDouble() : null,
+      anchorLongitude: n.length >= 7 ? (n[6] as num).toDouble() : null,
     );
     graph.addNode(node);
     if (node.kind == NodeKind.entrance) entrances.add(node);
