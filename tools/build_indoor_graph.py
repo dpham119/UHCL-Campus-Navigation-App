@@ -67,7 +67,7 @@ def load_door_hints():
     data = json.load(open(path, encoding="utf-8"))
     out = {}
     for b, rs in data.items():
-        if b.startswith("_") or b in ("vertical_links", "rules_buildings", "open_rooms"):
+        if b.startswith("_") or b in ("vertical_links", "rules_buildings", "open_rooms", "open_room_lines", "closed_stairs", "open_room_frame_deg", "no_auto_entrance", "extra_entrances"):
             continue
         for n, v in rs.items():
             out[(b, n)] = v if isinstance(v, dict) else {"door": v}
@@ -88,6 +88,24 @@ def load_open_rooms():
     if not os.path.exists(path):
         return {}
     return {b: set(v) for b, v in json.load(open(path, encoding="utf-8")).get("open_rooms", {}).items()}
+
+
+def _hint_file():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "door_hints.json")
+    return json.load(open(path, encoding="utf-8")) if os.path.exists(path) else {}
+
+
+def load_open_room_lines():
+    """tools/door_hints.json "open_room_lines": {building: {room number: [[[u, v], ...], ...]}} - the walkable
+    aisles of an open room (a lab), drawn as straight lines in the building's own axes: u along the long wall,
+    v across it, in meters (the same u, v the pictures use, see _frame)."""
+    return _hint_file().get("open_room_lines", {})
+
+
+def load_closed_stairs():
+    """tools/door_hints.json "closed_stairs": {building: [[x, y], ...]} - stairs that must not be used (emergency
+    stairs): any stairwell within 1 m of the point, on every floor, is left out."""
+    return _hint_file().get("closed_stairs", {})
 
 
 def load_vertical_links():
@@ -206,6 +224,7 @@ def skeleton_edges(region):
     return segs
 
 
+NUB_OPEN_M = 1.1          # alcoves narrower than twice this are ignored when finding a hallway's centerline
 AXIS_TOL_DEG = 15.0        # a hallway line within this angle of the building's axes is left alone
 
 
@@ -229,11 +248,14 @@ def squared(poly, region, theta, tol=AXIS_TOL_DEG):
             out.append(b)
             continue
         best = None
+        cands = []
         for corner_u in ((ub[0], ua[1]), (ua[0], ub[1])):
             corner = back(corner_u)
             if ok_zone.contains(LineString([a, corner])) and ok_zone.contains(LineString([corner, b])):
-                best = corner
-                break
+                cands.append(corner)
+        if cands:
+            # rule buildings: take the corner that stays furthest from the walls (not one that dips into an alcove)
+            best = max(cands, key=lambda q_: region.boundary.distance(Point(q_))) if tol <= 1.0 else cands[0]
         if best is not None:
             out.append((round(best[0], 2), round(best[1], 2)))
         out.append(b)
@@ -328,6 +350,133 @@ def clean_skeleton(segs, region=None, theta=None, tol=AXIS_TOL_DEG):
     return list(points), edges
 
 
+def straighten_runs(pts, edges, hall, theta, tol_deg=8.0, merge_m=1.3):
+    """Hallway lines that run along a building axis are laid dead straight, midway between the two walls
+    (measured where the hallway is at its ordinary width, so alcoves and bumps do not pull the line aside)."""
+    c, s_ = math.cos(theta), math.sin(theta)
+    fwd = lambda p: (p[0] * c + p[1] * s_, -p[0] * s_ + p[1] * c)
+    back = lambda u, v: (u * c - v * s_, u * s_ + v * c)
+    P = [fwd(p) for p in pts]
+    adj = defaultdict(list)
+    cls = {}
+    for k, (a, b) in enumerate(edges):
+        du, dv = abs(P[b][0] - P[a][0]), abs(P[b][1] - P[a][1])
+        ang = math.degrees(math.atan2(dv, du))
+        cls[k] = "u" if ang <= tol_deg else ("v" if ang >= 90 - tol_deg else "d")
+        adj[a].append(k)
+        adj[b].append(k)
+    par = list(range(len(edges)))
+    def f(x):
+        while par[x] != x:
+            par[x] = par[par[x]]
+            x = par[x]
+        return x
+    perp = lambda k: (sum(P[n][1] for n in edges[k]) / 2 if cls[k] == "u" else sum(P[n][0] for n in edges[k]) / 2)
+    for n, ks in adj.items():
+        for i in range(len(ks)):
+            for j in range(i + 1, len(ks)):
+                a, b = ks[i], ks[j]
+                if cls[a] == cls[b] != "d" and (len(ks) == 2 or abs(perp(a) - perp(b)) < merge_m):
+                    par[f(a)] = f(b)
+    runs = defaultdict(list)
+    for k in range(len(edges)):
+        if cls[k] != "d":
+            runs[f(k)].append(k)
+    target = {}
+    for key, ks in runs.items():
+        kind = cls[ks[0]]
+        samples = []
+        for k in ks:
+            a, b = edges[k]
+            L = math.dist(pts[a], pts[b])
+            m = max(1, int(L / 0.5))
+            for i in range(m + 1):
+                t = i / m
+                x, y = pts[a][0] + (pts[b][0] - pts[a][0]) * t, pts[a][1] + (pts[b][1] - pts[a][1]) * t
+                u0, v0 = fwd((x, y))
+                if kind == "u":
+                    ln = LineString([back(u0, v0 - 12), back(u0, v0 + 12)])
+                else:
+                    ln = LineString([back(u0 - 12, v0), back(u0 + 12, v0)])
+                cut = hall.intersection(ln)
+                best = None
+                for g in getattr(cut, "geoms", [cut]):
+                    if g.geom_type == "LineString" and g.distance(Point(x, y)) < 0.05:
+                        best = g
+                if best is None:
+                    continue
+                q0, q1 = fwd(best.coords[0]), fwd(best.coords[-1])
+                lo, hi = (q0[1], q1[1]) if kind == "u" else (q0[0], q1[0])
+                lo, hi = min(lo, hi), max(lo, hi)
+                samples.append((hi - lo, (hi + lo) / 2))
+        if len(samples) < 3:
+            continue
+        ws = sorted(w for w, _ in samples)
+        w0 = ws[int(0.3 * (len(ws) - 1))]
+        good = sorted(m for w, m in samples if w <= w0 * 1.15 + 0.1)
+        target[key] = good[len(good) // 2]
+    # two straight runs of the same direction joined by a short jog are one hallway line: lay them on one line
+    rpar = {k: k for k in target}
+    def rf(x):
+        while rpar[x] != x:
+            rpar[x] = rpar[rpar[x]]
+            x = rpar[x]
+        return x
+    for k, (a, b) in enumerate(edges):
+        if cls[k] == "d" or math.dist(pts[a], pts[b]) > 2.2:
+            continue
+        for kind in ("u", "v"):
+            if cls[k] == kind:
+                continue
+            ra = [f(e) for e in adj[a] if cls[e] == kind and f(e) in target]
+            rb = [f(e) for e in adj[b] if cls[e] == kind and f(e) in target]
+            for x_ in ra:
+                for y_ in rb:
+                    if x_ != y_ and abs(target[x_] - target[y_]) < merge_m + 0.5:
+                        rpar[rf(x_)] = rf(y_)
+    length_of = defaultdict(float)
+    for key, ks in runs.items():
+        if key in target:
+            length_of[key] = sum(math.dist(pts[edges[k][0]], pts[edges[k][1]]) for k in ks)
+    groups_t = defaultdict(list)
+    for key in target:
+        groups_t[rf(key)].append(key)
+    for members in groups_t.values():
+        if len(members) > 1:
+            tot = sum(length_of[m] for m in members) or 1.0
+            avg = sum(target[m] * length_of[m] for m in members) / tot
+            for m in members:
+                target[m] = avg
+    newP = {}
+    for n, ks in adj.items():
+        u, v = P[n]
+        us = [target[f(k)] for k in ks if cls[k] == "v" and f(k) in target]
+        vs = [target[f(k)] for k in ks if cls[k] == "u" and f(k) in target]
+        if us:
+            u = sum(us) / len(us)
+        if vs:
+            v = sum(vs) / len(vs)
+        newP[n] = (u, v)
+    out = list(pts)
+    for n, (u, v) in newP.items():
+        x, y = back(u, v)
+        out[n] = (round(x, 2), round(y, 2))
+    # nodes that landed on the same spot become one node
+    index, new_pts, remap = {}, [], []
+    for p_ in out:
+        if p_ not in index:
+            index[p_] = len(new_pts)
+            new_pts.append(p_)
+        remap.append(index[p_])
+    seen, new_edges = set(), []
+    for a, b in edges:
+        a, b = remap[a], remap[b]
+        if a != b and (min(a, b), max(a, b)) not in seen:
+            seen.add((min(a, b), max(a, b)))
+            new_edges.append((a, b))
+    return new_pts, new_edges
+
+
 def _clean_ring(coords):
     pts = list(coords)[:-1]
     changed = True
@@ -378,6 +527,9 @@ def find_nubs(corr_union):
     return nubs
 
 
+STEM_MAX_M = 9.0          # a door's stem never runs further than this along an axis (no long lines down a hallway)
+
+
 def axis_foot_of(B, ids, v, floor, bi, region, theta):
     """Straight out from node v along a building axis (into open space, not along a wall) until it
     meets a hallway line; the shortest clear way. Returns that node, or None if there is none."""
@@ -401,16 +553,16 @@ def axis_foot_of(B, ids, v, floor, bi, region, theta):
             wx, wy = ax - vx, ay - vy
             t = (wx * ey - wy * ex) / den          # distance along the ray
             u = (wx * dy - wy * dx) / den          # position along the segment
-            if t > 0.3 and -1e-6 <= u <= 1 + 1e-6 and (best is None or t < best[0]):
+            if 0.3 < t <= STEM_MAX_M and -1e-6 <= u <= 1 + 1e-6 and (best is None or t < best[0]):
                 hit = (vx + dx * t, vy + dy * t)
                 if region.buffer(0.3).contains(LineString([(vx, vy), hit])):
                     best = (t, a, b, u, math.hypot(ex, ey), hit)
     if best is None:
         return None
     _, a, b, u, length, (px, py) = best
-    if u * length < 0.4:
+    if u * length < 0.12:
         return a
-    if (1 - u) * length < 0.4:
+    if (1 - u) * length < 0.12:
         return b
     acc = B.edges[(a, b) if a < b else (b, a)][1]
     del B.edges[(a, b) if a < b else (b, a)]
@@ -453,6 +605,13 @@ def skeleton_foot_of(B, ids, v, floor, bi):
 
 def build(folder, out_path):
     rooms = load_rooms(folder)
+    closed = load_closed_stairs()
+    if closed:
+        def is_closed(r):
+            return r["use"][:3] == "007" and any(r["poly"].distance(Point(x, y)) < 1.0 for x, y in closed.get(r["bld"], ()))
+        before = len(rooms)
+        rooms = [r for r in rooms if not is_closed(r)]
+        print("closed (emergency) stairs left out: %d stairwell(s)" % (before - len(rooms)))
     hints = load_door_hints()
     rule_blds = load_rule_buildings()
     open_rooms = load_open_rooms()
@@ -501,7 +660,16 @@ def build(folder, out_path):
         # ---- hallway centerlines ----
         ids = []
         if not hall_part.is_empty:
-            pts, edges = clean_skeleton(skeleton_edges(hall_part), region, theta_of[bld], 1.0 if bld in rule_blds else AXIS_TOL_DEG)
+            skel_poly = hall_part
+            if bld in rule_blds:
+                # the centerline follows the hallway itself, not its alcoves: look at the hallway with the
+                # alcoves (shallow dead-end bumps) taken off, so it runs straight and equally far from both walls
+                core = hall_part.buffer(-NUB_OPEN_M).buffer(NUB_OPEN_M).buffer(0.05)
+                if not core.is_empty and core.area > 0.85 * hall_part.area:
+                    skel_poly = core
+            pts, edges = clean_skeleton(skeleton_edges(skel_poly), region, theta_of[bld], 1.0 if bld in rule_blds else AXIS_TOL_DEG)
+            if bld in rule_blds and pts:
+                pts, edges = straighten_runs(pts, edges, hall_part, theta_of[bld])
             local = [B.add_node(x, y, floor, K_CORRIDOR, bi) for x, y in pts]
             ids.extend(local)
             for a, b in edges:
@@ -517,8 +685,39 @@ def build(folder, out_path):
                     tree = cKDTree([B.xy[i] for i in ids])
         # open rooms (a big lab): one straight line along each building axis, crossing in the middle
         lab_center = {}
+        lab_lines = load_open_room_lines().get(bld, {})
         for r in open_rs:
             th = theta_of[bld]
+            if r["num"] in lab_lines:
+                th_lab = math.radians(_hint_file().get("open_room_frame_deg", {}).get(bld, math.degrees(th)))
+                cth, sth = math.cos(th_lab), math.sin(th_lab)
+                back_uv = lambda u, v: (u * cth - v * sth, u * sth + v * cth)
+                lines = [LineString([back_uv(*pt) for pt in ln]) for ln in lab_lines[r["num"]]]
+                merged = unary_union(lines)            # splits the lines where they cross
+                made = {}
+                def lab_node(pt):
+                    key = (round(pt[0], 2), round(pt[1], 2))
+                    if key not in made:
+                        made[key] = B.add_node(key[0], key[1], floor, K_CORRIDOR, bi)
+                        ids.append(made[key])
+                    return made[key]
+                for piece in getattr(merged, "geoms", [merged]):
+                    cs = list(piece.coords)
+                    for a_, b_ in zip(cs, cs[1:]):
+                        if math.dist(a_, b_) > 0.05:
+                            B.add_edge(lab_node(a_), lab_node(b_))
+                cen = r["poly"].centroid
+                center = min(made.values(), key=lambda k: math.dist(B.xy[k], (cen.x, cen.y)))
+                lab_center[id(r)] = center
+                lab_nodes = list(made.values())
+                others_ids = [i for i in ids if i not in lab_nodes]
+                if others_ids:
+                    tree_o = cKDTree([B.xy[i] for i in others_ids])
+                    best = min(((tree_o.query(B.xy[k])[0], k, others_ids[int(tree_o.query(B.xy[k])[1])]) for k in lab_nodes))
+                    if best[0] <= 25:
+                        B.add_edge(best[1], best[2])
+                stats["open rooms"] += 1
+                continue
             ax_u, ax_v = (math.cos(th), math.sin(th)), (-math.sin(th), math.cos(th))
             inner = r["poly"].buffer(-0.6)
             c = r["poly"].centroid
@@ -593,7 +792,8 @@ def build(folder, out_path):
         nub_via = {}               # nub index -> via node
 
         # ---- rooms, stairs, elevators ----
-        others = [r for r in rs if r["use"][:3] not in ("006", "007", "008", "011")]
+        others = [r for r in rs if r["use"][:3] not in ("006", "007", "008", "011")
+                  and not (bld in rule_blds and r["num"][:1] == "T" and r["use"][:3] == "001")]   # unnumbered closets / shafts: no nodes
         for r in others:
             lat, lon = r["center"]
             x, y = proj(lon, lat)
@@ -645,6 +845,9 @@ def build(folder, out_path):
         via_nodes = {}
 
         def skeleton_foot(v):
+            near_ = [(math.dist(B.xy[i], B.xy[v]), i) for i in ids if i != v]
+            if near_ and min(near_)[0] < 0.4:        # standing right on a hallway node: use it
+                return min(near_)[1]
             if rules_on:
                 hit = axis_foot_of(B, ids, v, floor, bi, region, theta_of[bld])
                 if hit is not None:
@@ -711,7 +914,7 @@ def build(folder, out_path):
 
         connected = set()
         gap = {}
-        for r in spaces:
+        for r in sorted(spaces, key=lambda q_: (0 if hints.get((bld, q_["num"])) else 1, q_["num"])):
             gap[id(r)] = r["poly"].distance(region) if not region.is_empty else 1e9
             if skel_tree is not None and (gap[id(r)] <= DOOR_GAP or hints.get((bld, r["num"]))):
                 hall_door(r)
@@ -844,7 +1047,7 @@ def build(folder, out_path):
             continue
         wtree = cKDTree([B.xy[i] for i in wl])
         found = 0
-        for r in ground:
+        for r in ([] if bld in _hint_file().get("no_auto_entrance", []) else ground):
             if r["use"][:3] != "006" or not pat.search(r["name"]):
                 continue
             if r["poly"].distance(boundary) > 2.5:
@@ -856,13 +1059,19 @@ def build(folder, out_path):
             n = B.add_node(p.x, p.y, 1, K_ENTRANCE, bi)
             B.add_edge(n, wl[j])
             found += 1
-        if found == 0:      # no named vestibule: use the walkable point nearest the outside wall
+        if found == 0 and bld not in _hint_file().get("no_auto_entrance", []):      # no named vestibule: use the walkable point nearest the outside wall
             dist = [(Point(B.xy[i]).distance(boundary), i) for i in wl]
             d, i = min(dist)
             n = B.add_node(B.xy[i][0], B.xy[i][1], 1, K_ENTRANCE, bi)
             B.add_edge(n, i, 0.5)
             found = 1
             stats["buildings with fallback entrance"] += 1
+        for ex, ey in _hint_file().get("extra_entrances", {}).get(bld, []):
+            n = B.add_node(ex, ey, 1, K_ENTRANCE, bi)
+            hit = (axis_foot_of(B, wl, n, 1, bi, zones[(bld, 1)][0], theta_of[bld]) if bld in rule_blds else None)
+            B.add_edge(n, hit if hit is not None else skeleton_foot_of(B, wl, n, 1, bi))
+            found += 1
+            stats["entrances from hints"] += 1
         stats["entrances"] += found
 
     # ---- right angles only (buildings listed in "rules_buildings") ----
