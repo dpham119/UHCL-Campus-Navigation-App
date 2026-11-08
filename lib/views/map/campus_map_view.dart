@@ -54,6 +54,9 @@ class CampusMapView extends StatefulWidget {
 class CampusMapViewState extends State<CampusMapView> {
   final MapController _mapController = MapController();
 
+  // Reports typed by users (kept in memory only until there is a database).
+  final List<Map<String, String>> _reports = [];
+
   List<Polygon> _walkwayPolygons = [];
 
   LatLng? _currentLocation;
@@ -1397,6 +1400,11 @@ class CampusMapViewState extends State<CampusMapView> {
                       : const Icon(Icons.my_location),
                   onPressed: _isLocating ? null : _getCurrentLocation,
                 ),
+                IconButton(
+                  tooltip: 'Report an issue',
+                  icon: const Icon(Icons.report_problem_outlined),
+                  onPressed: _openReportDialog,
+                ),
                 // IconButton(
                 //   tooltip: 'Set manual starting location',
                 //   icon: Icon(
@@ -1478,6 +1486,21 @@ class CampusMapViewState extends State<CampusMapView> {
             child: _buildDetailsCard(),
           ),
       ],
+    );
+  }
+
+  Future<void> _openReportDialog() async {
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (_) => _ReportDialog(location: _selectedLayer),
+    );
+    if (result == null || !mounted) return;
+    setState(() => _reports.add(result));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Report submitted. Thank you!'),
+        duration: Duration(seconds: 2),
+      ),
     );
   }
 
@@ -1822,5 +1845,94 @@ class _LabelBox {
   bool overlaps(_LabelBox other, double factor) {
     return (cx - other.cx).abs() < (width + other.width) / 2 * factor + 1 &&
         (cy - other.cy).abs() < (height + other.height) / 2 * factor + 1;
+  }
+}
+
+/// Small form for reporting issues such as construction or an elevator that
+/// is out of service. Pops with {type, text, location} on submit.
+class _ReportDialog extends StatefulWidget {
+  final String location;
+  const _ReportDialog({required this.location});
+
+  @override
+  State<_ReportDialog> createState() => _ReportDialogState();
+}
+
+class _ReportDialogState extends State<_ReportDialog> {
+  static const List<String> _types = [
+    'Construction',
+    'Elevator out of service',
+    'Closed path or door',
+    'Other',
+  ];
+
+  final TextEditingController _controller = TextEditingController();
+  String _type = _types.first;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canSubmit = _controller.text.trim().isNotEmpty;
+    return AlertDialog(
+      title: const Text('Report an issue'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: _type,
+              decoration: const InputDecoration(labelText: 'Type'),
+              items: _types
+                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                  .toList(),
+              onChanged: (v) => setState(() => _type = v ?? _type),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              minLines: 3,
+              maxLines: 5,
+              maxLength: 300,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Describe the issue',
+                hintText: 'e.g. Elevator in Delta is out of service',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Area: ${widget.location}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: canSubmit
+              ? () => Navigator.of(context).pop({
+                    'type': _type,
+                    'text': _controller.text.trim(),
+                    'location': widget.location,
+                    'time': DateTime.now().toIso8601String(),
+                  })
+              : null,
+          child: const Text('Submit'),
+        ),
+      ],
+    );
   }
 }
