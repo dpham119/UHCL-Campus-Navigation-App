@@ -354,6 +354,47 @@ class CampusMapViewState extends State<CampusMapView> {
     ];
   }
 
+bool _routeEdgeAllowed(
+  CampusGraph graph,
+  RouteGenerator generator,
+  GraphEdge edge,
+) {
+  final fromNode = graph.nodeById(edge.from);
+  final toNode = graph.nodeById(edge.to);
+
+  if (fromNode == null || toNode == null) {
+    return false;
+  }
+
+  final touchesStairs =
+      fromNode.kind == NodeKind.stairs ||
+      toNode.kind == NodeKind.stairs;
+
+  final touchesElevator =
+      fromNode.kind == NodeKind.elevator ||
+      toNode.kind == NodeKind.elevator;
+
+  if (_accessibleOnly) {
+    // ACCESSIBILITY ON:
+    // Never allow stairs.
+    if (touchesStairs) {
+      return false;
+    }
+
+    // Keep the accessibility restrictions already implemented
+    // by the route generator.
+    return generator.accessibleEdgeFilter(edge);
+  }
+
+  // ACCESSIBILITY OFF:
+  // Never allow elevator routes.
+  if (touchesElevator) {
+    return false;
+  }
+
+  return true;
+}
+
   void _generateRoute(CampusFeature start, CampusFeature destination) {
     _stopLiveNavigation();
     final graph = _graph;
@@ -392,8 +433,8 @@ class CampusMapViewState extends State<CampusMapView> {
             final candidate = generator.generate(
               a.id,
               b.id,
-              edgeFilter:
-                  _accessibleOnly ? generator.accessibleEdgeFilter : null,
+              edgeFilter: (edge) =>
+                  _routeEdgeAllowed(graph, generator, edge),
             );
             if (best == null ||
                 candidate.distanceMeters < best.distanceMeters) {
