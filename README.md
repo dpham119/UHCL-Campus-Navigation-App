@@ -5,7 +5,6 @@ UHCL PathFinder is a campus navigation app for the University of Houston-Clear L
 
 This is our senior capstone project. We built it with Flutter, UHCL's own campus map data (ArcGIS), and a routing engine that we wrote ourselves instead of calling a maps service.
 
-<!-- Add screenshots here, for example: ![Route to a room](docs/route.png) -->
 Why we built it
 
 Google Maps and Apple Maps get you to the front of a building, then stop. Finding the right room on the second or third floor of a big building is the hard part, especially for new students, visitors, and anyone who cannot use stairs. We wanted one app that handles the whole trip: parking lot, sidewalk, front door, hallway, elevator, room.
@@ -86,3 +85,14 @@ flutter analyze
 flutter test
 
 The routing tests cover the shortest-path search, the accessible filter (no stairs, elevators allowed), entrance selection for buildings, and multi-floor routes on the real campus data.
+
+Ideas for the future
+Indoor maps for the remaining buildings
+Step-by-step turn directions
+Saving issue reports to a database so staff can see them
+Showing which elevators are out of service
+
+Team
+Devin Pham
+Jebin Eason
+Christopher Nguyen
