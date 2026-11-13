@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+
 import '../../lib/routing/campus_graph_loader.dart';
 import '../../lib/routing/routing.dart';
 
@@ -124,16 +125,31 @@ void main() {
       final generator = RouteGenerator(build());
 
       final normal = generator.generate('n1', 'i6');
-      expect(normal.path.map((n) => n.id),
-          ['n1', 'n2', 'i0', 'i1', 'i2', 'i4', 'i6']);
+      expect(normal.path.map((n) => n.id), [
+        'n1',
+        'n2',
+        'i0',
+        'i1',
+        'i2',
+        'i4',
+        'i6',
+      ]);
 
       final accessible = generator.generate(
         'n1',
         'i6',
         edgeFilter: (edge) => edge.isAccessible,
       );
-      expect(accessible.path.map((n) => n.id),
-          ['n1', 'n2', 'i0', 'i1', 'i2', 'i3', 'i5', 'i6']);
+      expect(accessible.path.map((n) => n.id), [
+        'n1',
+        'n2',
+        'i0',
+        'i1',
+        'i2',
+        'i3',
+        'i5',
+        'i6',
+      ]);
     });
 
     test('nearestNode can be limited to one kind of node', () {
@@ -177,8 +193,7 @@ void main() {
     test('routes between rooms on different floors of the Bayou Building', () {
       final graph = loadBoth();
       final rooms = graph.nodes
-          .where((n) =>
-              n.kind == NodeKind.room && n.building.contains('BAYOU'))
+          .where((n) => n.kind == NodeKind.room && n.building.contains('BAYOU'))
           .toList();
       final first = rooms.firstWhere((n) => n.floor == 1);
       final upstairs = rooms.lastWhere((n) => n.floor == 3);
@@ -196,10 +211,8 @@ void main() {
       expect(graph.nodeCount, greaterThan(50));
 
       final nodes = graph.nodes.toList();
-      final result = RouteGenerator(graph).generate(
-        nodes.first.id,
-        nodes.last.id,
-      );
+      final result = RouteGenerator(graph)
+          .generate(nodes.first.id, nodes.last.id);
       expect(result.distanceMeters, greaterThan(0));
       expect(result.path.length, greaterThan(1));
     });

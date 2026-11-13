@@ -29,15 +29,14 @@ GraphNode _node(
   NodeKind kind, {
   int floor = 1,
   double lon = -95.0,
-}) =>
-    GraphNode(
-      id: id,
-      latitude: 29.0,
-      longitude: lon,
-      floor: floor,
-      kind: kind,
-      building: 'T',
-    );
+}) => GraphNode(
+  id: id,
+  latitude: 29.0,
+  longitude: lon,
+  floor: floor,
+  kind: kind,
+  building: 'T',
+);
 
 void main() {
   group('accessibleEdgeFilter (small graph)', () {
@@ -98,8 +97,14 @@ void main() {
       );
       expect(_hasKind(accessible, NodeKind.stairs), isFalse);
       expect(_hasKind(accessible, NodeKind.elevator), isTrue);
-      expect(accessible.path.map((n) => n.id),
-          ['C1', 'X', 'C2', 'E1', 'E2', 'R2']);
+      expect(accessible.path.map((n) => n.id), [
+        'C1',
+        'X',
+        'C2',
+        'E1',
+        'E2',
+        'R2',
+      ]);
       expect(accessible.distanceMeters, greaterThan(normal.distanceMeters));
     });
 
@@ -121,8 +126,13 @@ void main() {
           'B',
           edgeFilter: generator.accessibleEdgeFilter,
         ),
-        throwsA(isA<RouteException>()
-            .having((e) => e.error, 'error', RouteError.noPathFound)),
+        throwsA(
+          isA<RouteException>().having(
+            (e) => e.error,
+            'error',
+            RouteError.noPathFound,
+          ),
+        ),
       );
     });
   });
@@ -147,10 +157,12 @@ void main() {
     /// Every [step]-th room node of [building] on [floor], in id order.
     List<GraphNode> roomsOn(String building, int floor, {int step = 40}) {
       final rooms = graph.nodes
-          .where((n) =>
-              n.kind == NodeKind.room &&
-              n.building == building &&
-              n.floor == floor)
+          .where(
+            (n) =>
+                n.kind == NodeKind.room &&
+                n.building == building &&
+                n.floor == floor,
+          )
           .toList();
       return [for (var i = 0; i < rooms.length; i += step) rooms[i]];
     }
@@ -171,8 +183,9 @@ void main() {
       for (final floor in [1, 2, 3]) {
         for (final kind in [NodeKind.stairs, NodeKind.elevator]) {
           expect(
-            graph.nodes.any((n) =>
-                n.kind == kind && n.building == bayou && n.floor == floor),
+            graph.nodes.any(
+              (n) => n.kind == kind && n.building == bayou && n.floor == floor,
+            ),
             isTrue,
             reason: '$kind missing on floor $floor',
           );
@@ -182,7 +195,9 @@ void main() {
 
     test('elevator-to-elevator floor links exist and are accessible', () {
       var links = 0;
-      for (final node in graph.nodes.where((n) => n.kind == NodeKind.elevator)) {
+      for (final node in graph.nodes.where(
+        (n) => n.kind == NodeKind.elevator,
+      )) {
         for (final edge in graph.edgesFrom(node.id)) {
           final other = graph.nodeById(edge.to)!;
           if (other.floor != node.floor) {
@@ -237,8 +252,10 @@ void main() {
           final normal = generator.generate(a.id, b.id);
           final route = accessible(a, b);
           if (route == null) continue;
-          expect(route.distanceMeters,
-              greaterThanOrEqualTo(normal.distanceMeters - 1e-6));
+          expect(
+            route.distanceMeters,
+            greaterThanOrEqualTo(normal.distanceMeters - 1e-6),
+          );
           if (_hasKind(normal, NodeKind.stairs)) {
             found++;
             expect(_hasKind(route, NodeKind.stairs), isFalse);
@@ -252,7 +269,8 @@ void main() {
     test('outdoor location -> upper-floor room works when accessible', () {
       // An outdoor node that an entrance of the Bayou building links to.
       final entrance = graph.nodes.firstWhere(
-          (n) => n.kind == NodeKind.entrance && n.building == bayou);
+        (n) => n.kind == NodeKind.entrance && n.building == bayou,
+      );
       final outdoor = graph
           .edgesFrom(entrance.id)
           .map((e) => graph.nodeById(e.to)!)
@@ -272,8 +290,9 @@ void main() {
 
     test('outdoor pathways still route the same with accessibility on', () {
       final outdoorNodes = <GraphNode>[];
-      for (final entrance
-          in graph.nodes.where((n) => n.kind == NodeKind.entrance)) {
+      for (final entrance in graph.nodes.where(
+        (n) => n.kind == NodeKind.entrance,
+      )) {
         for (final edge in graph.edgesFrom(entrance.id)) {
           final other = graph.nodeById(edge.to)!;
           if (other.kind == NodeKind.outdoor) {

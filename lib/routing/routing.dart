@@ -1,3 +1,4 @@
+export 'building_entrances.dart';
 export 'campus_graph.dart';
 export 'distance.dart';
 export 'graph_edge.dart';

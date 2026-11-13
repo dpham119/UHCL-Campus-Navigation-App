@@ -121,8 +121,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const ListTile(
             leading: Icon(Icons.info_outline),
-            title: Text('About Campus Navigation'),
-            subtitle: Text('UHCL Campus Navigation App'),
+            title: Text('About UHCL PathFinder'),
+            subtitle: Text('UHCL PathFinder campus navigation app'),
           ),
 
           const SizedBox(height: 30),

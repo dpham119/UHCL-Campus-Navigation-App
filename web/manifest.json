@@ -1,11 +1,11 @@
 {
-    "name": "uhcl_campus_navigation",
-    "short_name": "uhcl_campus_navigation",
+    "name": "UHCL PathFinder",
+    "short_name": "PathFinder",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FDFDFD",
+    "theme_color": "#0B3A82",
+    "description": "UHCL PathFinder: indoor and outdoor campus navigation for the University of Houston-Clear Lake.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

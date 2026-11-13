@@ -12,7 +12,7 @@ class CampusNavigationApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'UHCL Campus Navigation',
+      title: 'UHCL PathFinder',
       debugShowCheckedModeBanner: false,
 
       theme: AppTheme.lightTheme,

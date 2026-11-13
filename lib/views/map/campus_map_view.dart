@@ -340,6 +340,13 @@ class CampusMapViewState extends State<CampusMapView> {
     CampusFeature feature,
     GraphNode primary,
   ) {
+    if (feature.featureType == 'building') {
+      final index = _buildings.indexWhere((b) => b.name == feature.name);
+      final entrances = entrancesOfBuilding(graph, [
+        for (final b in _buildings) b.polygons,
+      ], index);
+      return entrances.isEmpty ? [primary] : entrances;
+    }
     if (feature.featureType != 'room') return [primary];
     final lat = primary.anchorLatitude ?? primary.latitude;
     final lon = primary.anchorLongitude ?? primary.longitude;
@@ -354,46 +361,56 @@ class CampusMapViewState extends State<CampusMapView> {
     ];
   }
 
-bool _routeEdgeAllowed(
-  CampusGraph graph,
-  RouteGenerator generator,
-  GraphEdge edge,
-) {
-  final fromNode = graph.nodeById(edge.from);
-  final toNode = graph.nodeById(edge.to);
+  bool _routeEdgeAllowed(
+    CampusGraph graph,
+    RouteGenerator generator,
+    GraphEdge edge, {
+    Set<String> avoidInteriorOf = const {},
+  }) {
+    final fromNode = graph.nodeById(edge.from);
+    final toNode = graph.nodeById(edge.to);
 
-  if (fromNode == null || toNode == null) {
-    return false;
-  }
-
-  final touchesStairs =
-      fromNode.kind == NodeKind.stairs ||
-      toNode.kind == NodeKind.stairs;
-
-  final touchesElevator =
-      fromNode.kind == NodeKind.elevator ||
-      toNode.kind == NodeKind.elevator;
-
-  if (_accessibleOnly) {
-    // ACCESSIBILITY ON:
-    // Never allow stairs.
-    if (touchesStairs) {
+    if (fromNode == null || toNode == null) {
       return false;
     }
 
-    // Keep the accessibility restrictions already implemented
-    // by the route generator.
-    return generator.accessibleEdgeFilter(edge);
-  }
+    // A building used as the start or end is only reached from outside:
+    // its hallways, rooms, stairs and elevators are off limits, so the route
+    // stops at the entrance instead of walking through to another door.
+    bool isInterior(GraphNode node) =>
+        node.floor > 0 &&
+        node.kind != NodeKind.entrance &&
+        avoidInteriorOf.contains(node.building);
+    if (isInterior(fromNode) || isInterior(toNode)) {
+      return false;
+    }
 
-  // ACCESSIBILITY OFF:
-  // Never allow elevator routes.
-  if (touchesElevator) {
-    return false;
-  }
+    final touchesStairs =
+        fromNode.kind == NodeKind.stairs || toNode.kind == NodeKind.stairs;
 
-  return true;
-}
+    final touchesElevator =
+        fromNode.kind == NodeKind.elevator || toNode.kind == NodeKind.elevator;
+
+    if (_accessibleOnly) {
+      // ACCESSIBILITY ON:
+      // Never allow stairs.
+      if (touchesStairs) {
+        return false;
+      }
+
+      // Keep the accessibility restrictions already implemented
+      // by the route generator.
+      return generator.accessibleEdgeFilter(edge);
+    }
+
+    // ACCESSIBILITY OFF:
+    // Never allow elevator routes.
+    if (touchesElevator) {
+      return false;
+    }
+
+    return true;
+  }
 
   void _generateRoute(CampusFeature start, CampusFeature destination) {
     _stopLiveNavigation();
@@ -423,18 +440,42 @@ bool _routeEdgeAllowed(
 
     try {
       final generator = RouteGenerator(graph);
-      // A room with more than one door: try every door, keep the shortest.
+      final startDoors = _doorsOf(graph, start, from.node);
+      final endDoors = _doorsOf(graph, destination, to.node);
+
+      // Buildings that hold a room endpoint stay open; a building used as
+      // a whole (start or destination) is kept to its entrances.
+      final roomBuildings = <String>{
+        if (start.featureType == 'room') from.node.building,
+        if (destination.featureType == 'room') to.node.building,
+      };
+      final avoidInteriorOf = <String>{
+        for (final entry in [
+          if (start.featureType == 'building') ...startDoors,
+          if (destination.featureType == 'building') ...endDoors,
+        ])
+          if (entry.kind == NodeKind.entrance &&
+              !roomBuildings.contains(entry.building))
+            entry.building,
+      };
+
+      // A start or end with more than one door (a room, or a building with
+      // several entrances): try every pair, keep the shortest.
       RouteResult? best;
       RouteException? lastError;
-      for (final a in _doorsOf(graph, start, from.node)) {
-        for (final b in _doorsOf(graph, destination, to.node)) {
+      for (final a in startDoors) {
+        for (final b in endDoors) {
           if (a.id == b.id) continue;
           try {
             final candidate = generator.generate(
               a.id,
               b.id,
-              edgeFilter: (edge) =>
-                  _routeEdgeAllowed(graph, generator, edge),
+              edgeFilter: (edge) => _routeEdgeAllowed(
+                graph,
+                generator,
+                edge,
+                avoidInteriorOf: avoidInteriorOf,
+              ),
             );
             if (best == null ||
                 candidate.distanceMeters < best.distanceMeters) {
@@ -698,9 +739,9 @@ bool _routeEdgeAllowed(
     return LatLng(lat / points.length, lon / points.length);
   }
 
-  LatLng _averageCenter(List<CampusFeature> features) {
-    return _averagePoint(features.map((feature) => feature.center).toList());
-  }
+  // LatLng _averageCenter(List<CampusFeature> features) {
+  //   return _averagePoint(features.map((feature) => feature.center).toList());
+  // }
 
   List<CampusFeature> get _visibleFeatures {
     switch (_selectedLayer) {
@@ -903,10 +944,8 @@ bool _routeEdgeAllowed(
           ? math.min(150.0, label.length * fontSize * 0.6 + 12)
           : label.length * fontSize * 0.62 + 10;
       final double height = fontSize * (outdoor ? 2.0 : 1.0) + 8;
-      final double cx =
-          feature.center.longitude * mPerDegLon / metersPerPixel;
-      final double cy =
-          feature.center.latitude * mPerDegLat / metersPerPixel;
+      final double cx = feature.center.longitude * mPerDegLon / metersPerPixel;
+      final double cy = feature.center.latitude * mPerDegLat / metersPerPixel;
       final box = _LabelBox(cx, cy, width, height);
       final clash = placed.any((p) => p.overlaps(box, overlapAllowed));
       if (!clash) {
@@ -1084,26 +1123,27 @@ bool _routeEdgeAllowed(
         _selectedLayer = 'Outdoor Campus';
       });
 
-      _navigationSubscription = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 3,
-        ),
-      ).listen(
-        (position) {
-          if (!mounted || !_isNavigating) return;
-          final location = LatLng(position.latitude, position.longitude);
-          setState(() => _currentLocation = location);
-          if (_followUser) {
-            _mapController.move(location, _mapController.camera.zoom);
-          }
-        },
-        onError: (Object error) {
-          if (!mounted) return;
-          _stopLiveNavigation();
-          _showMessage('Live GPS error: $error');
-        },
-      );
+      _navigationSubscription =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 3,
+            ),
+          ).listen(
+            (position) {
+              if (!mounted || !_isNavigating) return;
+              final location = LatLng(position.latitude, position.longitude);
+              setState(() => _currentLocation = location);
+              if (_followUser) {
+                _mapController.move(location, _mapController.camera.zoom);
+              }
+            },
+            onError: (Object error) {
+              if (!mounted) return;
+              _stopLiveNavigation();
+              _showMessage('Live GPS error: $error');
+            },
+          );
     } catch (error) {
       if (!mounted) return;
       _stopLiveNavigation();
@@ -1638,8 +1678,12 @@ bool _routeEdgeAllowed(
                 onPressed: _isNavigating
                     ? _stopLiveNavigation
                     : _startLiveNavigation,
-                icon: Icon(_isNavigating ? Icons.stop_circle : Icons.navigation),
-                label: Text(_isNavigating ? 'Stop Navigation' : 'Start Navigation'),
+                icon: Icon(
+                  _isNavigating ? Icons.stop_circle : Icons.navigation,
+                ),
+                label: Text(
+                  _isNavigating ? 'Stop Navigation' : 'Start Navigation',
+                ),
               ),
             ),
             if (_isNavigating && !_followUser)
@@ -1965,11 +2009,11 @@ class _ReportDialogState extends State<_ReportDialog> {
         FilledButton(
           onPressed: canSubmit
               ? () => Navigator.of(context).pop({
-                    'type': _type,
-                    'text': _controller.text.trim(),
-                    'location': widget.location,
-                    'time': DateTime.now().toIso8601String(),
-                  })
+                  'type': _type,
+                  'text': _controller.text.trim(),
+                  'location': widget.location,
+                  'time': DateTime.now().toIso8601String(),
+                })
               : null,
           child: const Text('Submit'),
         ),

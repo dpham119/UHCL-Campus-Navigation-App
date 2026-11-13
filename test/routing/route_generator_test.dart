@@ -12,7 +12,9 @@ import '../../lib/routing/routing.dart';
 CampusGraph buildSampleGraph({bool blockBC = false}) {
   final graph = CampusGraph();
   for (final id in ['A', 'B', 'C', 'D', 'E']) {
-    graph.addNode(GraphNode(id: id, name: 'Node $id', latitude: 29.0, longitude: -95.0));
+    graph.addNode(
+      GraphNode(id: id, name: 'Node $id', latitude: 29.0, longitude: -95.0),
+    );
   }
   graph.addEdge('A', 'B', distanceMeters: 100);
   graph.addEdge('B', 'C', distanceMeters: 100, isAccessible: !blockBC);
@@ -72,40 +74,65 @@ void main() {
       graph.addEdge('A', 'B', distanceMeters: 10, isClosed: true);
       expect(
         () => RouteGenerator(graph).generate('A', 'B'),
-        throwsA(isA<RouteException>()
-            .having((e) => e.error, 'error', RouteError.noPathFound)),
+        throwsA(
+          isA<RouteException>().having(
+            (e) => e.error,
+            'error',
+            RouteError.noPathFound,
+          ),
+        ),
       );
     });
 
     test('unreachable destination throws noPathFound', () {
       expect(
         () => RouteGenerator(buildSampleGraph()).generate('A', 'E'),
-        throwsA(isA<RouteException>()
-            .having((e) => e.error, 'error', RouteError.noPathFound)),
+        throwsA(
+          isA<RouteException>().having(
+            (e) => e.error,
+            'error',
+            RouteError.noPathFound,
+          ),
+        ),
       );
     });
 
     test('unknown start throws unknownStart', () {
       expect(
         () => RouteGenerator(buildSampleGraph()).generate('X', 'A'),
-        throwsA(isA<RouteException>()
-            .having((e) => e.error, 'error', RouteError.unknownStart)),
+        throwsA(
+          isA<RouteException>().having(
+            (e) => e.error,
+            'error',
+            RouteError.unknownStart,
+          ),
+        ),
       );
     });
 
     test('unknown destination throws unknownDestination', () {
       expect(
         () => RouteGenerator(buildSampleGraph()).generate('A', 'X'),
-        throwsA(isA<RouteException>()
-            .having((e) => e.error, 'error', RouteError.unknownDestination)),
+        throwsA(
+          isA<RouteException>().having(
+            (e) => e.error,
+            'error',
+            RouteError.unknownDestination,
+          ),
+        ),
       );
     });
 
     test('empty graph throws emptyGraph', () {
       expect(
         () => RouteGenerator(CampusGraph()).generate('A', 'B'),
-        throwsA(isA<RouteException>()
-            .having((e) => e.error, 'error', RouteError.emptyGraph)),
+        throwsA(
+          isA<RouteException>().having(
+            (e) => e.error,
+            'error',
+            RouteError.emptyGraph,
+          ),
+        ),
       );
     });
   });

@@ -6,13 +6,13 @@ import 'package:latlong2/latlong.dart';
 import '../../lib/routing/routing.dart';
 
 GraphNode _n(String id, double lat, double lon, NodeKind kind) => GraphNode(
-      id: id,
-      latitude: lat,
-      longitude: lon,
-      floor: 1,
-      kind: kind,
-      building: 'B',
-    );
+  id: id,
+  latitude: lat,
+  longitude: lon,
+  floor: 1,
+  kind: kind,
+  building: 'B',
+);
 
 void main() {
   // An L-shaped hallway: east along lat 0..0.0001, then north.
@@ -39,10 +39,24 @@ void main() {
   final regions = IndoorRegions.parse(json);
 
   test('segmentInside accepts hallway lines and rejects wall crossings', () {
-    expect(regions.segmentInside('B', 1, const LatLng(0.00005, 0.00005),
-        const LatLng(0.00005, 0.00095)), isTrue);
-    expect(regions.segmentInside('B', 1, const LatLng(0.00005, 0.00005),
-        const LatLng(0.00095, 0.00095)), isFalse);
+    expect(
+      regions.segmentInside(
+        'B',
+        1,
+        const LatLng(0.00005, 0.00005),
+        const LatLng(0.00005, 0.00095),
+      ),
+      isTrue,
+    );
+    expect(
+      regions.segmentInside(
+        'B',
+        1,
+        const LatLng(0.00005, 0.00005),
+        const LatLng(0.00095, 0.00095),
+      ),
+      isFalse,
+    );
   });
 
   test('smoothPath keeps the corner of an L-shaped hallway', () {

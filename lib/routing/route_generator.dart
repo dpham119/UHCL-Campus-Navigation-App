@@ -29,6 +29,37 @@ class RouteGenerator {
         graph.nodeById(edge.to)?.kind != NodeKind.stairs;
   };
 
+  /// The edge filter for a route request.
+  ///
+  /// With [accessibleOnly] it is [accessibleEdgeFilter]; otherwise there is
+  /// no restriction beyond [avoidInteriorOf]. Every building named in
+  /// [avoidInteriorOf] is kept to its entrances: edges to its corridors,
+  /// rooms, stairs or elevators are not used. That is how a route whose
+  /// start or end is a whole building (not a room) stops at the door
+  /// instead of walking through the hallways to a different door.
+  /// Returns null when nothing needs filtering.
+  bool Function(GraphEdge edge)? routeFilter({
+    required bool accessibleOnly,
+    Set<String> avoidInteriorOf = const {},
+  }) {
+    if (!accessibleOnly && avoidInteriorOf.isEmpty) return null;
+
+    final base = accessibleOnly ? accessibleEdgeFilter : null;
+    bool isInterior(String id) {
+      final node = graph.nodeById(id);
+      return node != null &&
+          node.floor > 0 &&
+          node.kind != NodeKind.entrance &&
+          avoidInteriorOf.contains(node.building);
+    }
+
+    return (edge) {
+      if (base != null && !base(edge)) return false;
+      if (avoidInteriorOf.isEmpty) return true;
+      return !isInterior(edge.from) && !isInterior(edge.to);
+    };
+  }
+
   /// Finds the shortest route from [startId] to [destinationId].
   ///
   /// Closed edges are never used. [edgeFilter] can exclude more edges,
